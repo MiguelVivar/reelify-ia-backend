@@ -1,0 +1,96 @@
+# Archivos de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Entornos virtuales
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Variables de entorno
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Archivos de log
+*.log
+logs/
+
+# Archivos temporales
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Archivos de video temporales
+/tmp/video_processing/
+/tmp/clip_processing/
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.mp3
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# MinIO data
+minio_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Modelos de ML descargados
+models/
+*.pth
+*.pt
+*.onnx
+
+# Whisper cache
+~/.cache/whisper/
+
+# FFmpeg temp files
+ffmpeg2pass-*
+ffmpeg_*

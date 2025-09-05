@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # Clip Generator Microservice
+  clip-generator:
+    build:
+      context: ../clip-generator
+      dockerfile: Dockerfile
+    container_name: clip-generator
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=8001
+      - LOG_LEVEL=INFO
+      - TEMP_DIR=/tmp/video_processing
+      - MAX_CLIP_DURATION=180
+      - MIN_CLIP_DURATION=15
+      - CLIPS_OUTPUT_DIR=/app/clips/raw
+    volumes:
+      - /tmp/video_processing:/tmp/video_processing
+      - clip_storage:/app/clips
+    networks:
+      - reelify-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Clip Selector Microservice (merged and fixed)
+  clip-selector:
+    build:
+      context: ../clip-selector
+      dockerfile: Dockerfile
+    container_name: clip-selector
+    ports:
+      - "8002:8002"
+    environment:
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECURE=false
+      - MINIO_BUCKET=agentetiktok
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=8002
+      - LOG_LEVEL=INFO
+      - TEMP_DIR=/tmp/clip_processing
+      - WHISPER_MODEL=base
+      - WHISPER_DEVICE=cpu
+      - VIRAL_KEYWORDS=oferta,descuento,quiero,increíble,gratis,limitado,exclusivo,promoción,rebaja,outlet
+      - EMOTION_KEYWORDS=amor,odio,feliz,triste,enojado,sorprendido,emocionado,increíble,wow,genial
+      - MIN_VIRAL_SCORE=0.3
+      - CLIPS_INPUT_DIR=/app/clips/raw
+      - CLIPS_OUTPUT_DIR=/app/clips/viral
+    depends_on:
+      - minio
+    volumes:
+      - /tmp/clip_processing:/tmp/clip_processing
+      - clip_storage:/app/clips
+    networks:
+      - reelify-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # MinIO Client for bucket setup
+  minio-setup:
+    image: minio/mc:latest
+    container_name: minio-setup
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Waiting for MinIO to start...' &&
+      sleep 10 &&
+      /usr/bin/mc alias set minio http://minio:9000 minioadmin minioadmin &&
+      /usr/bin/mc mb minio/agentetiktok --ignore-existing &&
+      /usr/bin/mc policy set public minio/agentetiktok &&
+      echo 'MinIO bucket setup completed'
+      "
+    networks:
+      - reelify-network
+
+volumes:
+  clip_storage:
+    driver: local
+  minio_data:
+
+networks:
+  reelify-network:
+    driver: bridge
