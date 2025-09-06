@@ -1,4 +1,3 @@
-import whisper
 import os
 import logging
 from typing import Dict, Any
@@ -7,57 +6,68 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 class WhisperService:
+    """
+    Mock Whisper service for development without heavy dependencies
+    Replace with actual Whisper implementation when needed
+    """
+    
     def __init__(self):
         self.model = None
-        self.model_name = settings.whisper_model
-        self.device = settings.whisper_device
+        self.model_name = getattr(settings, 'whisper_model', 'base')
+        self.device = getattr(settings, 'whisper_device', 'cpu')
+        logger.info("Initialized Mock Whisper Service")
     
     def _load_model(self):
-        """Lazy load Whisper model"""
-        if self.model is None:
-            logger.info(f"Loading Whisper model: {self.model_name}")
-            self.model = whisper.load_model(self.model_name, device=self.device)
-            logger.info("Whisper model loaded successfully")
+        """Mock model loading"""
+        logger.info(f"Mock loading Whisper model: {self.model_name}")
+        self.model = "mock_model"
+        logger.info("Mock Whisper model loaded successfully")
     
     async def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
         """
-        Transcribe audio using Whisper
-        Returns transcription with timestamps and language detection
+        Mock transcription that returns sample data
         """
         try:
             self._load_model()
             
-            logger.info(f"Transcribing audio: {audio_path}")
+            logger.info(f"Mock transcribing audio: {audio_path}")
             
-            # Transcribe with timestamps
-            result = self.model.transcribe(
-                audio_path,
-                word_timestamps=True,
-                language="es"  # Spanish by default, can be auto-detected
-            )
+            # Simulate processing time
+            import asyncio
+            await asyncio.sleep(0.5)
             
-            # Extract segments with timestamps
-            segments = []
-            for segment in result.get("segments", []):
-                segments.append({
-                    "start": segment["start"],
-                    "end": segment["end"],
-                    "text": segment["text"].strip(),
-                    "words": segment.get("words", [])
-                })
-            
-            transcription_result = {
-                "text": result["text"].strip(),
-                "language": result.get("language", "es"),
-                "segments": segments,
-                "duration": result.get("duration", 0)
+            # Return mock transcription data with viral keywords
+            mock_transcription = {
+                "text": "This is an amazing video with incredible content that could go viral. Check this out everyone! This is so funny and awesome.",
+                "language": "en",
+                "segments": [
+                    {
+                        "start": 0.0,
+                        "end": 3.0,
+                        "text": "This is an amazing video with incredible",
+                        "words": []
+                    },
+                    {
+                        "start": 3.0,
+                        "end": 6.0,
+                        "text": "content that could go viral. Check this out",
+                        "words": []
+                    },
+                    {
+                        "start": 6.0,
+                        "end": 8.0,
+                        "text": "everyone! This is so funny and awesome.",
+                        "words": []
+                    }
+                ],
+                "duration": 8.0
             }
             
-            logger.info(f"Transcription completed. Language: {transcription_result['language']}")
-            return transcription_result
+            logger.info(f"Mock transcription completed. Language: {mock_transcription['language']}")
+            return mock_transcription
             
         except Exception as e:
-            logger.error(f"Error transcribing audio: {e}")
+            logger.error(f"Error in mock transcription: {e}")
             return {
                 "text": "",
                 "language": "unknown",

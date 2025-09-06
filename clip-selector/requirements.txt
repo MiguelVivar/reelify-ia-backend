@@ -1,19 +1,10 @@
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
 pydantic==1.10.12
-pydantic[dotenv]==1.10.12
-python-multipart==0.0.6
 python-dotenv==1.0.0
 requests==2.31.0
 aiohttp==3.9.0
 aiofiles==23.2.0
-openai-whisper==20231117
-torch==2.1.0
-torchaudio==2.1.0
-transformers==4.35.0
-moviepy==1.0.3
-ffmpeg-python==0.2.0
+# whisper-tiny==1.0.0  # Temporal: usando versión mock por Docker build performance
 numpy==1.24.3
-scikit-learn==1.3.0
-spacy==3.7.2
-textblob==0.17.1
+ffmpeg-python==0.2.0

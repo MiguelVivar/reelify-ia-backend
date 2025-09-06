@@ -2,12 +2,12 @@ import os
 import uuid
 import logging
 import ffmpeg
+import subprocess
+import json
 from typing import List, Dict, Tuple, Any
-from moviepy.editor import VideoFileClip
 from config import settings
 from whisper_service import WhisperService
 import re
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +17,17 @@ class ViralClipAnalyzer:
         self.temp_dir = settings.temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
         
-        # Compile keyword patterns for better performance
-        self.viral_patterns = [re.compile(rf'\b{keyword.lower()}\b') for keyword in settings.viral_keywords]
-        self.emotion_patterns = [re.compile(rf'\b{keyword.lower()}\b') for keyword in settings.emotion_keywords]
+        # Viral keywords for analysis
+        self.viral_keywords = [
+            'amazing', 'incredible', 'unbelievable', 'shocking', 'wow',
+            'omg', 'crazy', 'insane', 'awesome', 'epic', 'hilarious',
+            'funny', 'beautiful', 'gorgeous', 'stunning', 'perfect'
+        ]
+        
+        self.emotion_keywords = [
+            'love', 'hate', 'angry', 'sad', 'happy', 'excited',
+            'surprised', 'scared', 'confused', 'proud', 'jealous'
+        ]
     
     async def analyze_clip(self, clip_path: str) -> Dict[str, Any]:
         """
@@ -27,10 +35,8 @@ class ViralClipAnalyzer:
         Returns analysis results including transcription and viral score
         """
         try:
-            # Get video duration
-            video = VideoFileClip(clip_path)
-            duration = video.duration
-            video.close()
+            # Get video duration using FFprobe
+            duration = await self._get_video_duration(clip_path)
             
             # Extract audio for transcription
             audio_path = await self._extract_audio(clip_path)
@@ -65,6 +71,30 @@ class ViralClipAnalyzer:
                 "key_moments": []
             }
     
+    async def _get_video_duration(self, video_path: str) -> float:
+        """Get video duration using FFprobe"""
+        try:
+            cmd = [
+                'ffprobe', 
+                '-v', 'quiet',
+                '-show_entries', 'format=duration',
+                '-of', 'csv=p=0',
+                video_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                duration = float(result.stdout.strip())
+                return duration
+            else:
+                logger.error(f"FFprobe error: {result.stderr}")
+                return 0.0
+                
+        except Exception as e:
+            logger.error(f"Error getting video duration: {e}")
+            return 0.0
+    
     async def _extract_audio(self, video_path: str) -> str:
         """Extract audio from video for transcription"""
         audio_id = str(uuid.uuid4())
@@ -86,22 +116,21 @@ class ViralClipAnalyzer:
     async def _analyze_viral_potential(self, transcription: Dict[str, Any]) -> Dict[str, Any]:
         """
         Analyze transcription for viral potential using keyword matching
-        and semantic analysis
         """
         text = transcription.get("text", "").lower()
         segments = transcription.get("segments", [])
         
         # Find viral keywords
         viral_keywords_found = []
-        for i, pattern in enumerate(self.viral_patterns):
-            if pattern.search(text):
-                viral_keywords_found.append(settings.viral_keywords[i])
+        for keyword in self.viral_keywords:
+            if keyword.lower() in text:
+                viral_keywords_found.append(keyword)
         
         # Find emotion keywords
         emotion_keywords_found = []
-        for i, pattern in enumerate(self.emotion_patterns):
-            if pattern.search(text):
-                emotion_keywords_found.append(settings.emotion_keywords[i])
+        for keyword in self.emotion_keywords:
+            if keyword.lower() in text:
+                emotion_keywords_found.append(keyword)
         
         # Calculate viral score
         viral_score = self._calculate_viral_score(
@@ -151,11 +180,11 @@ class ViralClipAnalyzer:
         
         # Engagement patterns (0-20 points)
         engagement_patterns = [
-            r'\b(increíble|wow|genial|perfecto|excelente)\b',
-            r'\b(gratis|descuento|oferta|promoción)\b',
-            r'\b(quiero|necesito|deseo)\b',
+            r'\b(incredible|wow|amazing|perfect|excellent)\b',
+            r'\b(free|discount|offer|promotion)\b',
+            r'\b(want|need|desire)\b',
             r'[!]{2,}',  # Multiple exclamation marks
-            r'\b(ahora|hoy|limitado|exclusivo)\b'
+            r'\b(now|today|limited|exclusive)\b'
         ]
         
         pattern_matches = 0
@@ -210,14 +239,11 @@ class ViralClipAnalyzer:
                               output_path: str, target_duration: float = 30) -> bool:
         """
         Create a new viral clip based on key moments
-        Uses FunClip-like approach to select best segments
         """
         try:
             if not key_moments:
                 # If no key moments, take the middle part of the clip
-                video = VideoFileClip(original_path)
-                duration = video.duration
-                video.close()
+                duration = await self._get_video_duration(original_path)
                 
                 start_time = max(0, (duration - target_duration) / 2)
                 end_time = min(duration, start_time + target_duration)
@@ -244,7 +270,7 @@ class ViralClipAnalyzer:
                 return await self._extract_segment(original_path, start_time, end_time, output_path)
             
             else:
-                # Multiple moments - create compilation (for now, take the first best moment)
+                # Multiple moments - take the first best moment
                 best_moment = selected_moments[0]
                 start_time = best_moment["start"]
                 end_time = min(best_moment["end"] + target_duration, best_moment["start"] + target_duration)
@@ -289,7 +315,7 @@ class ViralClipAnalyzer:
                 ffmpeg
                 .input(input_path, ss=start_time, t=duration)
                 .output(output_path, vcodec='libx264', acodec='aac',
-                       **{'b:v': '2M', 'b:a': '128k'})
+                       **{'b:v': '1M', 'b:a': '128k'})  # Reduced bitrate
                 .overwrite_output()
                 .run(quiet=True)
             )

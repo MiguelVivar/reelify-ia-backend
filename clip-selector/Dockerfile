@@ -19,8 +19,8 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download spacy model for text processing
-RUN python -m spacy download es_core_news_sm
+# Skip spacy model download for mock version
+# RUN python -m spacy download es_core_news_sm
 
 # Copy source code
 COPY src/ ./src/

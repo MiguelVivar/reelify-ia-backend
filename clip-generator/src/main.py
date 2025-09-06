@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import logging
 import uvicorn
+import os
 from config import settings
 from routes import router
 
@@ -31,6 +33,10 @@ app.add_middleware(
 
 # Include routes
 app.include_router(router, prefix="/api/v1")
+
+# Mount static files for serving clips
+if os.path.exists(settings.clips_output_dir):
+    app.mount("/clips/raw", StaticFiles(directory=settings.clips_output_dir), name="clips")
 
 @app.get("/")
 async def root():

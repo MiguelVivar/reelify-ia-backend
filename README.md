@@ -95,8 +95,6 @@ docker-compose logs -f clip-selector
 
 - **Clip Generator**: http://localhost:8001
 - **Clip Selector**: http://localhost:8002
-- **MinIO Console**: http://localhost:9001 (admin/minioadmin)
-- **MinIO API**: http://localhost:9000
 
 ## 📡 Documentación API
 
