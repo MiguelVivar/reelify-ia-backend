@@ -17,17 +17,9 @@ class ViralClipAnalyzer:
         self.temp_dir = settings.temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
         
-        # Viral keywords for analysis
-        self.viral_keywords = [
-            'amazing', 'incredible', 'unbelievable', 'shocking', 'wow',
-            'omg', 'crazy', 'insane', 'awesome', 'epic', 'hilarious',
-            'funny', 'beautiful', 'gorgeous', 'stunning', 'perfect'
-        ]
-        
-        self.emotion_keywords = [
-            'love', 'hate', 'angry', 'sad', 'happy', 'excited',
-            'surprised', 'scared', 'confused', 'proud', 'jealous'
-        ]
+        # Use viral keywords from settings (Spanish keywords for marketing content)
+        self.viral_keywords = settings.viral_keywords
+        self.emotion_keywords = settings.emotion_keywords
     
     async def analyze_clip(self, clip_path: str) -> Dict[str, Any]:
         """
