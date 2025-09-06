@@ -22,6 +22,25 @@ Sistema escalable de dos microservicios en Python con FastAPI para procesar vide
 - **Containerización**: Docker + Docker Compose
 - **Networking**: Bridge network personalizada
 
+## 🎬 Formato de Clips Optimizado para Redes Sociales
+
+### Características del Formato Vertical
+- **Dimensiones**: 1080x1920 píxeles (formato TikTok/Instagram Reels)
+- **Orientación**: Vertical para máximo engagement en móviles
+- **Procesamiento Inteligente**: 
+  - Videos horizontales se centran automáticamente
+  - Se agregan barras negras para completar el formato vertical
+  - Mantiene la relación de aspecto original del contenido
+- **Calidad Optimizada**: 30 FPS, codec H.264, audio AAC 128k
+- **Configuración Flexible**: Dimensiones ajustables via variables de entorno
+
+### Proceso de Conversión
+1. **Análisis**: Se detectan las dimensiones del video original
+2. **Escalado**: Se calcula el factor de escala óptimo
+3. **Centrado**: El video se posiciona en el centro del canvas vertical
+4. **Relleno**: Se agregan barras negras superior/inferior o laterales según sea necesario
+5. **Exportación**: Se genera el clip final en formato vertical optimizado
+
 ## 📁 Estructura del Proyecto
 
 ```
@@ -120,13 +139,19 @@ Genera clips iniciales desde un video usando auto-highlighter.
       "url": "/clips/raw/clip_1.mp4",
       "start": 40,
       "end": 70,
-      "duration": 30
+      "duration": 30,
+      "width": 1080,
+      "height": 1920,
+      "format": "vertical"
     },
     {
       "url": "/clips/raw/clip_2.mp4", 
       "start": 120,
       "end": 180,
-      "duration": 60
+      "duration": 60,
+      "width": 1080,
+      "height": 1920,
+      "format": "vertical"
     }
   ],
   "message": "Generated 2 clips successfully"
@@ -224,6 +249,10 @@ TEMP_DIR=/tmp/video_processing
 CLIPS_OUTPUT_DIR=/app/clips/raw
 MAX_CLIP_DURATION=180
 MIN_CLIP_DURATION=15
+
+# Formato de Clips para Redes Sociales
+CLIP_WIDTH=1080
+CLIP_HEIGHT=1920
 ```
 
 #### Clip Selector (.env)

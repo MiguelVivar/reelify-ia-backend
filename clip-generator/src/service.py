@@ -49,12 +49,15 @@ class ClipGeneratorService:
                     # Save clip to persistent storage
                     clip_url = await self.file_service.save_clip(temp_clip_path, clip_id)
                     
-                    # Create metadata
+                    # Create metadata with format information
                     clip_metadata = ClipMetadata(
                         url=clip_url,
                         start=start_time,
                         end=end_time,
-                        duration=end_time - start_time
+                        duration=end_time - start_time,
+                        width=settings.clip_width,
+                        height=settings.clip_height,
+                        format="vertical"
                     )
                     clips_metadata.append(clip_metadata)
                     

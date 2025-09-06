@@ -60,6 +60,31 @@ class VideoProcessor:
         except Exception as e:
             logger.error(f"Error getting video duration: {e}")
             return 0.0
+
+    async def _get_video_dimensions(self, video_path: str) -> Tuple[int, int]:
+        """Get video width and height using FFprobe"""
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=width,height',
+                '-of', 'csv=s=x:p=0',
+                video_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                width, height = map(int, result.stdout.strip().split('x'))
+                return width, height
+            else:
+                logger.error(f"FFprobe error getting dimensions: {result.stderr}")
+                return 1920, 1080  # Default dimensions
+                
+        except Exception as e:
+            logger.error(f"Error getting video dimensions: {e}")
+            return 1920, 1080  # Default dimensions
     
     def _create_simple_segments(self, duration: float) -> List[Tuple[float, float]]:
         """Create simple time-based segments"""
@@ -94,20 +119,54 @@ class VideoProcessor:
         return segments[:5]  # Maximum 5 clips
     
     async def create_clip(self, video_path: str, start_time: float, end_time: float, output_path: str) -> bool:
-        """Create a clip from video using FFmpeg"""
+        """Create a vertical clip (configurable dimensions) from horizontal video with black bars for social media"""
         try:
             duration = end_time - start_time
             
+            # Get original video dimensions
+            original_width, original_height = await self._get_video_dimensions(video_path)
+            
+            # Target dimensions from configuration (default: 1080x1920 for TikTok/Instagram Reels)
+            target_width = settings.clip_width
+            target_height = settings.clip_height
+            
+            # Calculate scaling to fit the video within the target dimensions while maintaining aspect ratio
+            # We want to scale based on width since we're fitting horizontal video into vertical format
+            scale_factor = target_width / original_width
+            scaled_height = int(original_height * scale_factor)
+            
+            # If scaled height exceeds our target height, scale based on height instead
+            if scaled_height > target_height:
+                scale_factor = target_height / original_height
+                scaled_width = int(original_width * scale_factor)
+                scaled_height = target_height
+            else:
+                scaled_width = target_width
+            
+            logger.info(f"Scaling video from {original_width}x{original_height} to {scaled_width}x{scaled_height} "
+                       f"for target {target_width}x{target_height}")
+            
+            # Create vertical video with black background and centered horizontal video
             (
                 ffmpeg
                 .input(video_path, ss=start_time, t=duration)
-                .output(output_path, vcodec='libx264', acodec='aac', 
-                       **{'b:v': '1M', 'b:a': '128k'})  # Reduced bitrate
+                .filter('scale', scaled_width, scaled_height)  # Scale maintaining aspect ratio
+                .filter('pad', target_width, target_height, '(ow-iw)/2', '(oh-ih)/2', 'black')  # Center with black bars
+                .output(output_path, 
+                       vcodec='libx264', 
+                       acodec='aac',
+                       preset='fast',
+                       crf=23,
+                       **{
+                           'b:a': '128k',
+                           'r': '30',  # 30 fps for social media
+                           'pix_fmt': 'yuv420p'  # Ensure compatibility
+                       })
                 .overwrite_output()
                 .run(quiet=True)
             )
             
-            logger.info(f"Created clip: {output_path} ({start_time:.2f}s - {end_time:.2f}s)")
+            logger.info(f"Created vertical clip ({target_width}x{target_height}): {output_path} ({start_time:.2f}s - {end_time:.2f}s)")
             return True
             
         except Exception as e:
