@@ -14,6 +14,16 @@ class Settings(BaseSettings):
     # Almacenamiento de clips
     clips_output_dir: str = os.getenv("CLIPS_OUTPUT_DIR", "/app/clips/raw")
 
+    # OpenRouter API Configuration
+    openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    openrouter_base_url: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-chat")
+    
+    # Video Analysis Configuration
+    analysis_segment_duration: int = int(os.getenv("ANALYSIS_SEGMENT_DURATION", "30"))
+    max_analysis_segments: int = int(os.getenv("MAX_ANALYSIS_SEGMENTS", "20"))
+    highlight_threshold: float = float(os.getenv("HIGHLIGHT_THRESHOLD", "0.7"))
+
     # Configuración del servicio
     service_name: str = os.getenv("SERVICE_NAME", "clip-generator")
     service_host: str = os.getenv("SERVICE_HOST", "0.0.0.0")

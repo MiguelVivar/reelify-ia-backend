@@ -17,6 +17,14 @@ services:
       - CLIPS_OUTPUT_DIR=/app/clips/raw
       - CLIP_WIDTH=1080
       - CLIP_HEIGHT=1920
+      # OpenRouter API Configuration
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+      - DEEPSEEK_MODEL=deepseek/deepseek-chat
+      # Video Analysis Configuration
+      - ANALYSIS_SEGMENT_DURATION=30
+      - MAX_ANALYSIS_SEGMENTS=20
+      - HIGHLIGHT_THRESHOLD=0.7
     volumes:
       - /tmp/video_processing:/tmp/video_processing
       - clip_storage:/app/clips

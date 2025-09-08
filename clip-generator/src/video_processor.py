@@ -6,20 +6,24 @@ import subprocess
 import json
 from typing import List, Tuple
 from config import settings
+from deepseek_analyzer import DeepseekVideoAnalyzer
 
 logger = logging.getLogger(__name__)
 
 class VideoProcessor:
     def __init__(self):
         self.temp_dir = settings.temp_dir
+        self.deepseek_analyzer = DeepseekVideoAnalyzer()
         os.makedirs(self.temp_dir, exist_ok=True)
     
     async def detect_highlights(self, video_path: str) -> List[Tuple[float, float]]:
         """
-        Detecta los momentos destacados
+        Detecta los momentos destacados usando Deepseek AI para análisis inteligente
         Retorna una lista de tuplas (start_time, end_time)
         """
         try:
+            logger.info(f"Iniciando detección de highlights con IA para: {video_path}")
+            
             # Obtener la duración del video
             duration = await self._get_video_duration(video_path)
             
@@ -27,14 +31,27 @@ class VideoProcessor:
                 logger.warning("No se pudo obtener la duración del video o es inválida")
                 return []
             
-            # Enfoque simple de segmentación: dividir el video en clips basados en la duración
-            highlights = self._create_simple_segments(duration)
+            logger.info(f"Video duration: {duration:.2f}s - Analizando con Deepseek...")
+            
+            # Usar Deepseek para análisis inteligente de highlights
+            highlights = await self.deepseek_analyzer.analyze_video_highlights(video_path)
 
-            logger.info(f"Generados {len(highlights)} segmentos de la duración del video: {duration:.2f}s")
+            if not highlights:
+                logger.warning("Deepseek no encontró highlights, usando análisis de respaldo")
+                highlights = self._create_simple_segments(duration)
+
+            logger.info(f"Detección completada: {len(highlights)} highlights identificados")
+            for i, (start, end) in enumerate(highlights):
+                logger.info(f"  Highlight {i+1}: {start:.2f}s - {end:.2f}s (duración: {end-start:.2f}s)")
+            
             return highlights
             
         except Exception as e:
             logger.error(f"Error detectando puntos destacados: {e}")
+            # Fallback a análisis simple
+            duration = await self._get_video_duration(video_path)
+            if duration > 0:
+                return self._create_simple_segments(duration)
             return []
     
     async def _get_video_duration(self, video_path: str) -> float:
