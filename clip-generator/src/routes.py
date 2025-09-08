@@ -13,20 +13,20 @@ service = ClipGeneratorService()
 @router.post("/generate-initial-clips", response_model=ClipGenerationResponse)
 async def generate_initial_clips(request: VideoRequest):
     """
-    Generate initial clips from a video using auto-highlighter
-    
-    - **video_url**: Public URL of the video to process
-    
-    Returns a list of generated clips with metadata
+    Genera clips iniciales a partir de un video proporcionado.
+
+    - **video_url**: URL pública del video a procesar
+
+    Devuelve una lista de clips generados con metadatos.
     """
     try:
-        logger.info(f"Received clip generation request for: {request.video_url}")
-        
-        # Validate video URL
+        logger.info(f"Recibida solicitud de generación de clip para: {request.video_url}")
+
+        # Valida la URL del video
         if not request.video_url or not request.video_url.startswith(('http://', 'https://')):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid video URL provided"
+                detail="URL de video no válida proporcionada"
             )
         
         # Generate clips
@@ -36,24 +36,24 @@ async def generate_initial_clips(request: VideoRequest):
             return ClipGenerationResponse(
                 status="warning",
                 clips=[],
-                message="No clips could be generated from the video"
+                message="No se generaron clips del video proporcionado"
             )
-        
-        logger.info(f"Successfully generated {len(clips)} clips")
-        
+
+        logger.info(f"Se generaron correctamente {len(clips)} clips")
+
         return ClipGenerationResponse(
             status="success",
             clips=clips,
-            message=f"Generated {len(clips)} clips successfully"
+            message=f"Se generaron {len(clips)} clips correctamente"
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating clips: {e}")
+        logger.error(f"Error al generar clips: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Error interno del servidor: {str(e)}"
         )
 
 @router.get("/health")

@@ -11,7 +11,7 @@ class ClipMetadata(BaseModel):
     duration: float
     width: int = 1080
     height: int = 1920
-    format: str = "vertical"  # vertical format for social media
+    format: str = "vertical"
 
 class ClipGenerationResponse(BaseModel):
     status: str

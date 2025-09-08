@@ -13,70 +13,70 @@ service = ClipSelectorService()
 @router.post("/select-viral-clips", response_model=ClipSelectionResponse)
 async def select_viral_clips(request: ClipSelectionRequest):
     """
-    Select viral clips from input clips using Whisper transcription and viral analysis
-    
-    - **clips**: List of clip URLs to analyze for viral potential
-    
-    Returns a list of viral clips with keywords and metadata
+    Selecciona clips virales de los clips de entrada usando transcripción Whisper y análisis de viralidad
+
+    - **clips**: Lista de URLs de clips para analizar su potencial viral
+
+    Devuelve una lista de clips virales con palabras clave y metadatos
     """
     try:
-        logger.info(f"Received clip selection request for {len(request.clips)} clips")
-        
-        # Validate input
+        logger.info(f"Recibido {len(request.clips)} clips")
+
+        # Validar entrada
         if not request.clips:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No clips provided for analysis"
+                detail="Se requiere al menos un clip para procesar"
             )
         
-        # Validate URLs (can be HTTP URLs or local paths)
+        # Validar URLs (pueden ser URLs HTTP o rutas locales)
         for clip in request.clips:
             if not clip.url:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Empty clip URL provided"
+                    detail="Se requiere una URL de clip"
                 )
             
-            # Allow both HTTP URLs and local paths
+            # Permitir tanto URLs HTTP como rutas locales
             if not (clip.url.startswith(('http://', 'https://')) or clip.url.startswith('/clips/')):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid clip URL format: {clip.url}"
+                    detail=f"URL de clip no válida: {clip.url}"
                 )
         
-        # Process clips
+        # Procesar clips
         viral_clips = await service.select_viral_clips(request)
         
         if not viral_clips:
             return ClipSelectionResponse(
                 status="warning",
                 viral_clips=[],
-                message="No clips met the viral criteria"
+                message="No se encontraron clips virales"
             )
         
-        logger.info(f"Successfully selected {len(viral_clips)} viral clips")
+        logger.info(f"Seleccionados {len(viral_clips)} clips virales")
         
         return ClipSelectionResponse(
             status="success",
             viral_clips=viral_clips,
-            message=f"Selected {len(viral_clips)} viral clips from {len(request.clips)} input clips"
+            message=f"Seleccionados {len(viral_clips)} clips virales de {len(request.clips)} clips de entrada"
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error selecting viral clips: {e}")
+        logger.error(f"Error al seleccionar clips virales: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=f"Error interno del servidor: {str(e)}"
         )
 
 @router.get("/clips/viral/{filename}")
 async def get_viral_clip_file(filename: str):
     """
-    Serve viral clip files as binary data
+    Servir archivos de clips virales como datos binarios
     
-    - **filename**: Name of the viral clip file to download
+    - **filename**: Nombre del archivo de clip viral a descargar
     """
     try:
         file_path = os.path.join(settings.clips_output_dir, filename)
@@ -84,7 +84,7 @@ async def get_viral_clip_file(filename: str):
         if not os.path.exists(file_path):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Viral clip file not found"
+                detail="Archivo de clip viral no encontrado"
             )
         
         return FileResponse(
@@ -96,13 +96,13 @@ async def get_viral_clip_file(filename: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error serving viral clip file: {e}")
+        logger.error(f"Error al servir archivo de clip viral: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error serving file: {str(e)}"
+            detail=f"Error al servir archivo: {str(e)}"
         )
 
 @router.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "service": "clip-selector"}
+    """Endpoint de verificación de estado"""
+    return {"status": "saludable", "service": "clip-selector"}

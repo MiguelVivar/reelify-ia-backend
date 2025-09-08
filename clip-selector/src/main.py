@@ -5,7 +5,7 @@ import uvicorn
 from config import settings
 from routes import router
 
-# Configure logging
+# Configurar logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -13,14 +13,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Crear la aplicación FastAPI
 app = FastAPI(
     title="Clip Selector Service",
-    description="Microservice for selecting viral clips using Whisper and AI analysis",
+    description="Servicio para seleccionar clips virales de videos",
     version="1.0.0"
 )
 
-# Configure CORS
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,16 +29,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routes
+# Incluir rutas
 app.include_router(router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
-    return {"message": "Clip Selector Service", "version": "1.0.0"}
+    return {"message": "Servicio de Selección de Clips", "version": "1.0.0"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "service": settings.service_name}
+    return {"status": "saludable", "service": settings.service_name}
 
 if __name__ == "__main__":
     uvicorn.run(

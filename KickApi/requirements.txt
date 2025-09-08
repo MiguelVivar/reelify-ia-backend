@@ -1,0 +1,22 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+KickApi==0.3.5
+python-multipart==0.0.6
+moviepy==1.0.3
+requests==2.31.0
+Pillow==9.5.0
+psutil==5.9.6
+
+# Nuevas dependencias para funcionalidades avanzadas
+openai-whisper==20231117  # Para subtítulos automáticos con IA
+pydantic==2.5.0          # Para modelos de validación mejorados
+
+# Dependencias opcionales recomendadas (instalar manualmente)
+# torch                   # Para Whisper (si no se instala automáticamente)
+# ffmpeg-python          # Para operaciones FFmpeg más avanzadas (opcional)
+
+# IMPORTANTE: 
+# También debes instalar FFmpeg manualmente en tu sistema:
+# Windows: https://ffmpeg.org/download.html#build-windows
+# Linux: sudo apt install ffmpeg (Ubuntu/Debian) o sudo yum install ffmpeg (CentOS/RHEL)
+# macOS: brew install ffmpeg

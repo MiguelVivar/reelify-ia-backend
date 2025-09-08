@@ -7,36 +7,36 @@ logger = logging.getLogger(__name__)
 
 class WhisperService:
     """
-    Mock Whisper service for development without heavy dependencies
-    Replace with actual Whisper implementation when needed
+    Servicio Whisper simulado para desarrollo sin dependencias pesadas.
+    Reemplazar con la implementación real de Whisper cuando sea necesario.
     """
     
     def __init__(self):
         self.model = None
         self.model_name = getattr(settings, 'whisper_model', 'base')
         self.device = getattr(settings, 'whisper_device', 'cpu')
-        logger.info("Initialized Mock Whisper Service")
+        logger.info("Servicio Mock Whisper inicializado")
     
     def _load_model(self):
-        """Mock model loading"""
-        logger.info(f"Mock loading Whisper model: {self.model_name}")
+        """Carga del modelo (simulada)"""
+        logger.info(f"Cargando modelo Whisper (simulado): {self.model_name}")
         self.model = "mock_model"
-        logger.info("Mock Whisper model loaded successfully")
+        logger.info("Modelo Whisper (simulado) cargado correctamente")
     
     async def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
         """
-        Mock transcription that returns sample data
+        Transcripción simulada que devuelve datos de ejemplo.
         """
         try:
             self._load_model()
             
-            logger.info(f"Mock transcribing audio: {audio_path}")
+            logger.info(f"Transcribiendo audio (simulado): {audio_path}")
             
-            # Simulate processing time
+            # Simular tiempo de procesamiento
             import asyncio
             await asyncio.sleep(0.5)
             
-            # Return mock transcription data with viral keywords
+            # Devolver datos de transcripción simulada con palabras clave virales
             mock_transcription = {
                 "text": "This is an amazing video with incredible content that could go viral. Check this out everyone! This is so funny and awesome.",
                 "language": "en",
@@ -63,11 +63,11 @@ class WhisperService:
                 "duration": 8.0
             }
             
-            logger.info(f"Mock transcription completed. Language: {mock_transcription['language']}")
+            logger.info(f"Transcripción (simulada) completada. Idioma: {mock_transcription['language']}")
             return mock_transcription
             
         except Exception as e:
-            logger.error(f"Error in mock transcription: {e}")
+            logger.error(f"Error en transcripción simulada: {e}")
             return {
                 "text": "",
                 "language": "unknown",

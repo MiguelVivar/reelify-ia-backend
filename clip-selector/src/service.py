@@ -15,32 +15,32 @@ class ClipSelectorService:
         self.viral_analyzer = ViralClipAnalyzer()
     
     async def select_viral_clips(self, request: ClipSelectionRequest) -> List[ViralClip]:
-        """Main service method to select viral clips"""
+        """Método principal del servicio para seleccionar clips virales"""
         
         viral_clips = []
         
         for clip_input in request.clips:
             try:
-                logger.info(f"Processing clip: {clip_input.url}")
+                logger.info(f"Procesando clip: {clip_input.url}")
                 
-                # Generate unique ID for this clip processing
+                # Generar ID único para el procesamiento de este clip
                 clip_id = str(uuid.uuid4())
                 
-                # 1. Download clip (from URL or get local file)
+                # 1. Descargar clip (desde URL o obtener archivo local)
                 temp_clip_path = await self.file_service.download_clip(clip_input.url)
                 
-                # 2. Analyze clip for viral potential
+                # 2. Analizar clip para potencial viral
                 analysis = await self.viral_analyzer.analyze_clip(temp_clip_path)
                 
-                # 3. Check if clip meets viral threshold
+                # 3. Comprobar si el clip cumple el umbral viral
                 if analysis["viral_score"] < settings.min_viral_score:
-                    logger.info(f"Clip does not meet viral threshold: {analysis['viral_score']:.3f} < {settings.min_viral_score}")
-                    # Clean up if it was downloaded (not a local file)
+                    logger.info(f"El clip no cumple el umbral viral: {analysis['viral_score']:.3f} < {settings.min_viral_score}")
+                    # Limpiar si se descargó (no es un archivo local)
                     if not clip_input.url.startswith('/clips/'):
                         self.file_service.cleanup_temp_file(temp_clip_path)
                     continue
                 
-                # 4. Create optimized viral clip
+                # 4. Crear clip viral optimizado
                 viral_clip_id = f"viral_{clip_id}"
                 temp_viral_path = os.path.join(settings.temp_dir, f"{viral_clip_id}.mp4")
                 
@@ -51,10 +51,10 @@ class ClipSelectorService:
                 )
                 
                 if success and os.path.exists(temp_viral_path):
-                    # 5. Save viral clip to persistent storage
+                    # 5. Guardar clip viral en almacenamiento persistente
                     viral_url = await self.file_service.save_viral_clip(temp_viral_path, viral_clip_id)
                     
-                    # 6. Create viral clip metadata
+                    # 6. Crear metadatos del clip viral
                     viral_clip = ViralClip(
                         url=viral_url,
                         keywords=analysis["keywords_found"] + analysis["emotions_found"],
@@ -65,19 +65,19 @@ class ClipSelectorService:
                     
                     viral_clips.append(viral_clip)
                     
-                    logger.info(f"Successfully created viral clip: {viral_url} (score: {analysis['viral_score']:.3f})")
+                    logger.info(f"Clip viral creado con éxito: {viral_url} (puntuación: {analysis['viral_score']:.3f})")
                     
-                    # Clean up temp viral clip
+                    # Limpiar clip viral temporal
                     self.file_service.cleanup_temp_file(temp_viral_path)
                 else:
-                    logger.warning(f"Failed to create viral clip for: {clip_input.url}")
+                    logger.warning(f"No se pudo crear el clip viral para: {clip_input.url}")
                 
-                # Clean up downloaded clip if it was temporary
+                # Limpiar clip descargado si fue temporal
                 if not clip_input.url.startswith('/clips/'):
                     self.file_service.cleanup_temp_file(temp_clip_path)
                 
             except Exception as e:
-                logger.error(f"Error processing clip {clip_input.url}: {e}")
+                logger.error(f"Error al procesar el clip {clip_input.url}: {e}")
                 continue
         
         return viral_clips

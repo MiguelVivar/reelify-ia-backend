@@ -7,7 +7,7 @@ import os
 from config import settings
 from routes import router
 
-# Configure logging
+# Configuración de logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -15,14 +15,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Crear la aplicación FastAPI
 app = FastAPI(
     title="Clip Generator Service",
-    description="Microservice for generating video clips using auto-highlighter",
+    description="Servicio para generar clips de videos",
     version="1.0.0"
 )
 
-# Configure CORS
+# Configurar CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,20 +31,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routes
+# Incluir rutas
 app.include_router(router, prefix="/api/v1")
 
-# Mount static files for serving clips
+# Montar archivos estáticos para servir clips
 if os.path.exists(settings.clips_output_dir):
     app.mount("/clips/raw", StaticFiles(directory=settings.clips_output_dir), name="clips")
 
 @app.get("/")
 async def root():
-    return {"message": "Clip Generator Service", "version": "1.0.0"}
+    return {"message": "Servicio de Generación de Clips", "version": "1.0.0"}
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "service": settings.service_name}
+    return {"status": "saludable", "service": settings.service_name}
 
 if __name__ == "__main__":
     uvicorn.run(

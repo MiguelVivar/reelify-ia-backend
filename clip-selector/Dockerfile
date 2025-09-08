@@ -1,10 +1,10 @@
-# Use Python 3.11 slim image
+# Usar imagen slim de Python 3.11
 FROM python:3.11-slim
 
-# Set working directory
+# Establecer directorio de trabajo
 WORKDIR /app
 
-# Install system dependencies
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
@@ -13,24 +13,24 @@ RUN apt-get update && apt-get install -y \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copiar requirements primero para mejor caché
 COPY requirements.txt .
 
-# Install Python dependencies
+# Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Skip spacy model download for mock version
+# Omitir descarga del modelo spacy para versión mock
 # RUN python -m spacy download es_core_news_sm
 
-# Copy source code
+# Copiar código fuente
 COPY src/ ./src/
 COPY .env .
 
-# Create temp directory
+# Crear directorio temporal
 RUN mkdir -p /tmp/clip_processing
 
-# Expose port
+# Exponer puerto
 EXPOSE 8002
 
-# Run the application
+# Ejecutar la aplicación
 CMD ["python", "src/main.py"]

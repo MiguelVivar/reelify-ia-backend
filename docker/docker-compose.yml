@@ -12,9 +12,11 @@ services:
       - SERVICE_PORT=8001
       - LOG_LEVEL=INFO
       - TEMP_DIR=/tmp/video_processing
-      - MAX_CLIP_DURATION=180
+      - MAX_CLIP_DURATION=20
       - MIN_CLIP_DURATION=15
       - CLIPS_OUTPUT_DIR=/app/clips/raw
+      - CLIP_WIDTH=1080
+      - CLIP_HEIGHT=1920
     volumes:
       - /tmp/video_processing:/tmp/video_processing
       - clip_storage:/app/clips
@@ -59,8 +61,51 @@ services:
       retries: 3
     restart: unless-stopped
 
+  # Kick API Microservice
+  kick-api:
+    build:
+      context: ../KickApi
+      dockerfile: Dockerfile
+    container_name: kick-api
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=8003
+      - LOG_LEVEL=INFO
+      - TEMP_DIR=/tmp/kick_processing
+      - CONVERTED_VIDEOS_DIR=/app/converted_videos
+      - CACHE_EXPIRY_SECONDS=3600
+      - CLEANUP_INTERVAL_SECONDS=300
+      - WHISPER_MODEL=tiny
+      - WHISPER_TIMEOUT=180
+      - FFMPEG_TIMEOUT=300
+      - DOWNLOAD_TIMEOUT=120
+      - DEFAULT_QUALITY=medium
+      - DEFAULT_PLATFORM=general
+      - DEFAULT_FPS=30
+    volumes:
+      - /tmp/kick_processing:/tmp/kick_processing
+      - kick_storage:/app/converted_videos
+      - kick_temp:/app/temp
+    networks:
+      - reelify-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8003/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - clip-generator
+      - clip-selector
+
 volumes:
   clip_storage:
+    driver: local
+  kick_storage:
+    driver: local
+  kick_temp:
     driver: local
 
 networks:

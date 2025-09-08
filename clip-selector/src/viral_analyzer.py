@@ -16,30 +16,30 @@ class ViralClipAnalyzer:
         self.whisper_service = WhisperService()
         self.temp_dir = settings.temp_dir
         os.makedirs(self.temp_dir, exist_ok=True)
-        
-        # Use viral keywords from settings (Spanish keywords for marketing content)
+
+        # Usa palabras clave virales y emocionales de la configuración
         self.viral_keywords = settings.viral_keywords
         self.emotion_keywords = settings.emotion_keywords
     
     async def analyze_clip(self, clip_path: str) -> Dict[str, Any]:
         """
-        Analyze a single clip for viral potential
-        Returns analysis results including transcription and viral score
+        Analiza un clip para determinar su potencial viral.
+        Devuelve resultados que incluyen transcripción y puntuación viral.
         """
         try:
-            # Get video duration using FFprobe
+            # Obtener duración del video usando FFprobe
             duration = await self._get_video_duration(clip_path)
             
-            # Extract audio for transcription
+            # Extraer audio para transcripción
             audio_path = await self._extract_audio(clip_path)
             
-            # Transcribe audio
+            # Transcribir audio
             transcription = await self.whisper_service.transcribe_audio(audio_path)
             
-            # Analyze viral potential
+            # Analizar potencial viral
             viral_analysis = await self._analyze_viral_potential(transcription)
             
-            # Clean up audio file
+            # Limpiar archivo de audio
             if os.path.exists(audio_path):
                 os.remove(audio_path)
             
@@ -53,7 +53,7 @@ class ViralClipAnalyzer:
             }
             
         except Exception as e:
-            logger.error(f"Error analyzing clip {clip_path}: {e}")
+            logger.error(f"Error al analizar el clip {clip_path}: {e}")
             return {
                 "duration": 0,
                 "transcription": {"text": "", "segments": []},
@@ -64,7 +64,7 @@ class ViralClipAnalyzer:
             }
     
     async def _get_video_duration(self, video_path: str) -> float:
-        """Get video duration using FFprobe"""
+        """Obtener la duración del video usando FFprobe"""
         try:
             cmd = [
                 'ffprobe', 
@@ -80,15 +80,15 @@ class ViralClipAnalyzer:
                 duration = float(result.stdout.strip())
                 return duration
             else:
-                logger.error(f"FFprobe error: {result.stderr}")
+                logger.error(f"Error de FFprobe: {result.stderr}")
                 return 0.0
                 
         except Exception as e:
-            logger.error(f"Error getting video duration: {e}")
+            logger.error(f"Error al obtener la duración del video: {e}")
             return 0.0
     
     async def _extract_audio(self, video_path: str) -> str:
-        """Extract audio from video for transcription"""
+        """Extraer audio del video para transcripción"""
         audio_id = str(uuid.uuid4())
         audio_path = os.path.join(self.temp_dir, f"audio_{audio_id}.wav")
         
@@ -102,34 +102,34 @@ class ViralClipAnalyzer:
             )
             return audio_path
         except Exception as e:
-            logger.error(f"Error extracting audio: {e}")
+            logger.error(f"Error al extraer audio: {e}")
             raise
     
     async def _analyze_viral_potential(self, transcription: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze transcription for viral potential using keyword matching
+        Analizar la transcripción para potencial viral usando coincidencia de palabras clave
         """
         text = transcription.get("text", "").lower()
         segments = transcription.get("segments", [])
         
-        # Find viral keywords
+        # Encontrar palabras clave virales
         viral_keywords_found = []
         for keyword in self.viral_keywords:
             if keyword.lower() in text:
                 viral_keywords_found.append(keyword)
         
-        # Find emotion keywords
+        # Encontrar palabras clave de emoción
         emotion_keywords_found = []
         for keyword in self.emotion_keywords:
             if keyword.lower() in text:
                 emotion_keywords_found.append(keyword)
         
-        # Calculate viral score
+        # Calcular puntuación viral
         viral_score = self._calculate_viral_score(
             text, viral_keywords_found, emotion_keywords_found, segments
         )
         
-        # Find key moments (segments with high viral potential)
+        # Encontrar momentos clave (segmentos con alta potencial viral)
         key_moments = self._find_key_moments(segments, viral_keywords_found, emotion_keywords_found)
         
         return {
@@ -141,7 +141,7 @@ class ViralClipAnalyzer:
     
     def _calculate_viral_score(self, text: str, viral_keywords: List[str], 
                              emotion_keywords: List[str], segments: List[Dict]) -> float:
-        """Calculate viral score based on multiple factors"""
+        """Calcular la puntuación viral basada en múltiples factores"""
         
         if not text:
             return 0.0
@@ -149,11 +149,11 @@ class ViralClipAnalyzer:
         score = 0.0
         text_length = len(text.split())
         
-        # Keyword density score (0-40 points)
+        # Puntuación por densidad de palabras clave (0-40 puntos)
         keyword_density = (len(viral_keywords) + len(emotion_keywords)) / max(text_length, 1)
         score += min(keyword_density * 100, 40)
         
-        # Keyword variety score (0-20 points)
+        # Puntuación por variedad de categorías de palabras clave (0-20 puntos)
         unique_categories = set()
         if viral_keywords:
             unique_categories.add("viral")
@@ -161,8 +161,8 @@ class ViralClipAnalyzer:
             unique_categories.add("emotion")
         score += len(unique_categories) * 10
         
-        # Text length optimization (0-20 points)
-        # Favor medium-length texts (not too short, not too long)
+        # Optimización por longitud de texto (0-20 puntos)
+        # Favorece textos de longitud media (no muy cortos, no muy largos)
         if 20 <= text_length <= 100:
             score += 20
         elif 10 <= text_length < 20 or 100 < text_length <= 150:
@@ -170,12 +170,12 @@ class ViralClipAnalyzer:
         elif text_length > 5:
             score += 10
         
-        # Engagement patterns (0-20 points)
+        # Patrones de engagement (0-20 puntos)
         engagement_patterns = [
             r'\b(incredible|wow|amazing|perfect|excellent)\b',
             r'\b(free|discount|offer|promotion)\b',
             r'\b(want|need|desire)\b',
-            r'[!]{2,}',  # Multiple exclamation marks
+            r'[!]{2,}',  # Múltiples signos de exclamación
             r'\b(now|today|limited|exclusive)\b'
         ]
         
@@ -186,14 +186,14 @@ class ViralClipAnalyzer:
         
         score += min(pattern_matches * 4, 20)
         
-        # Normalize score to 0-1 range
+        # Normalizar puntuación a rango 0-1
         normalized_score = min(score / 100, 1.0)
         
         return round(normalized_score, 3)
     
     def _find_key_moments(self, segments: List[Dict], viral_keywords: List[str], 
                          emotion_keywords: List[str]) -> List[Dict]:
-        """Find segments with highest viral potential"""
+        """Encontrar segmentos con mayor potencial viral"""
         key_moments = []
         
         for segment in segments:
@@ -201,13 +201,13 @@ class ViralClipAnalyzer:
             moment_score = 0
             found_keywords = []
             
-            # Check for viral keywords in this segment
+            # Comprobar palabras clave virales en este segmento
             for keyword in viral_keywords:
                 if keyword.lower() in segment_text:
                     moment_score += 1
                     found_keywords.append(keyword)
             
-            # Check for emotion keywords in this segment
+            # Comprobar palabras clave de emoción en este segmento
             for keyword in emotion_keywords:
                 if keyword.lower() in segment_text:
                     moment_score += 0.5
@@ -222,19 +222,19 @@ class ViralClipAnalyzer:
                     "keywords": found_keywords
                 })
         
-        # Sort by score (highest first)
+        # Ordenar por puntuación (mayor primero)
         key_moments.sort(key=lambda x: x["score"], reverse=True)
         
-        return key_moments[:5]  # Return top 5 moments
+        return key_moments[:5]  # Devolver los 5 mejores momentos
     
     async def create_viral_clip(self, original_path: str, key_moments: List[Dict], 
                               output_path: str, target_duration: float = 30) -> bool:
         """
-        Create a new viral clip based on key moments
+        Crear un nuevo clip viral basado en momentos clave
         """
         try:
             if not key_moments:
-                # If no key moments, take the middle part of the clip
+                # Si no hay momentos clave, tomar la parte central del clip
                 duration = await self._get_video_duration(original_path)
                 
                 start_time = max(0, (duration - target_duration) / 2)
@@ -242,16 +242,16 @@ class ViralClipAnalyzer:
                 
                 return await self._extract_segment(original_path, start_time, end_time, output_path)
             
-            # Select best moments that fit within target duration
+            # Seleccionar los mejores momentos que quepan dentro de la duración objetivo
             selected_moments = self._select_optimal_moments(key_moments, target_duration)
             
             if len(selected_moments) == 1:
-                # Single moment - extend it if needed
+                # Momento único - extender si es necesario
                 moment = selected_moments[0]
                 duration = moment["end"] - moment["start"]
                 
                 if duration < target_duration:
-                    # Extend the clip symmetrically
+                    # Extender el clip de forma simétrica
                     extension = (target_duration - duration) / 2
                     start_time = max(0, moment["start"] - extension)
                     end_time = moment["end"] + extension
@@ -262,7 +262,7 @@ class ViralClipAnalyzer:
                 return await self._extract_segment(original_path, start_time, end_time, output_path)
             
             else:
-                # Multiple moments - take the first best moment
+                # Múltiples momentos - tomar el primer mejor momento y rellenar hasta target
                 best_moment = selected_moments[0]
                 start_time = best_moment["start"]
                 end_time = min(best_moment["end"] + target_duration, best_moment["start"] + target_duration)
@@ -270,16 +270,16 @@ class ViralClipAnalyzer:
                 return await self._extract_segment(original_path, start_time, end_time, output_path)
                 
         except Exception as e:
-            logger.error(f"Error creating viral clip: {e}")
+            logger.error(f"Error al crear el clip viral: {e}")
             return False
     
     def _select_optimal_moments(self, key_moments: List[Dict], target_duration: float) -> List[Dict]:
-        """Select optimal moments that fit within target duration"""
+        """Seleccionar momentos óptimos que encajen en la duración objetivo"""
         
         if not key_moments:
             return []
         
-        # Sort by score
+        # Ordenar por puntuación
         sorted_moments = sorted(key_moments, key=lambda x: x["score"], reverse=True)
         
         selected = []
@@ -292,14 +292,14 @@ class ViralClipAnalyzer:
                 selected.append(moment)
                 total_duration += moment_duration
             
-            if total_duration >= target_duration * 0.8:  # 80% of target duration
+            if total_duration >= target_duration * 0.8:  # 80% de la duración objetivo
                 break
         
         return selected if selected else [sorted_moments[0]]
     
     async def _extract_segment(self, input_path: str, start_time: float, 
                              end_time: float, output_path: str) -> bool:
-        """Extract a segment from video using FFmpeg"""
+        """Extraer un segmento del video usando FFmpeg"""
         try:
             duration = end_time - start_time
             
@@ -307,14 +307,14 @@ class ViralClipAnalyzer:
                 ffmpeg
                 .input(input_path, ss=start_time, t=duration)
                 .output(output_path, vcodec='libx264', acodec='aac',
-                       **{'b:v': '1M', 'b:a': '128k'})  # Reduced bitrate
+                       **{'b:v': '1M', 'b:a': '128k'})  # Bitrate reducido
                 .overwrite_output()
                 .run(quiet=True)
             )
             
-            logger.info(f"Created viral clip: {output_path} ({start_time:.2f}s - {end_time:.2f}s)")
+            logger.info(f"Clip viral creado: {output_path} ({start_time:.2f}s - {end_time:.2f}s)")
             return True
             
         except Exception as e:
-            logger.error(f"Error extracting segment: {e}")
+            logger.error(f"Error al extraer el segmento: {e}")
             return False

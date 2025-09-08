@@ -1,10 +1,10 @@
 # Use Python 3.11 slim image
 FROM python:3.11-slim
 
-# Set working directory
+# Setear directorio de trabajo
 WORKDIR /app
 
-# Install system dependencies
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsndfile1 \
@@ -12,21 +12,21 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copiar requirements.txt
 COPY requirements.txt .
 
-# Install Python dependencies
+# Instalar dependencias de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source code
+# Copiar código fuente
 COPY src/ ./src/
 COPY .env .
 
-# Create temp directory
+# Crear directorio temporal
 RUN mkdir -p /tmp/video_processing
 
-# Expose port
+# Exponer puerto
 EXPOSE 8001
 
-# Run the application
+# Ejecutar la aplicación
 CMD ["python", "src/main.py"]
