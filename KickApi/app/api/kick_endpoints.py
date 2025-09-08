@@ -80,6 +80,7 @@ async def download_clip(clip_id: str, format: str):
         # Configurar cabeceras de descarga
         file_size = os.path.getsize(temp_path)
         filename = f"{clip_data['title'] or 'clip'}_{clip_id}.{format}"
+        filename = filename.replace("/", "_").replace("\\", "_")  # Limpiar nombre de archivo
         
         headers = {
             "Content-Disposition": f"attachment; filename={filename}",
@@ -108,8 +109,8 @@ async def download_clip(clip_id: str, format: str):
         raise HTTPException(status_code=500, detail=f"Error descargando clip en {format.upper()}: {str(e)}")
 
 
-@router.get("/video/{video_id}/download/{format}")
-async def download_video(video_id: str, format: str):
+@router.get("/video/{uuid}/download/{format}")
+async def download_video(uuid: str, format: str):
     """Descargar un video en un formato específico (mp4 o mp3)"""
     if format not in ["mp4", "mp3"]:
         raise HTTPException(status_code=400, detail="Formato inválido. Usa 'mp4' o 'mp3'")
@@ -120,7 +121,7 @@ async def download_video(video_id: str, format: str):
         raise HTTPException(status_code=500, detail=str(e))
     
     try:
-        video_data = await kick_service.get_video_by_id(video_id)
+        video_data = await kick_service.get_video_by_uuid(uuid)
         
         # Crear archivo temporal
         with tempfile.NamedTemporaryFile(delete=False, suffix=f".{format}") as temp_file:
@@ -138,7 +139,7 @@ async def download_video(video_id: str, format: str):
         
         # Configurar cabeceras de descarga
         file_size = os.path.getsize(temp_path)
-        filename = f"{video_data['title'] or 'video'}_{video_id}.{format}"
+        filename = f"{video_data['title'] or 'video'}_{uuid}.{format}"
         
         headers = {
             "Content-Disposition": f"attachment; filename={filename}",

@@ -92,17 +92,17 @@ class KickService:
                     break
                     
                 video_data = VideoResponse(
-                    id=video.id,
+                    id=str(video.id),
                     title=video.title if video.title else "No title",
                     duration=video.duration,
                     views=video.views,
                     created_at=video.created_at,
                     updated_at=video.updated_at,
-                    thumbnail=video.thumbnail,
+                    thumbnail=video.thumbnail.get('src') if isinstance(video.thumbnail, dict) else video.thumbnail,
                     download_url=video.stream,
-                    mp4_download=f"/video/{video.id}/download/mp4",
-                    mp3_download=f"/video/{video.id}/download/mp3",
-                    video_url=f"https://kick.com/{channel_name}/videos/{video.id}",
+                    mp4_download=f"/video/{video.uuid}/download/mp4",
+                    mp3_download=f"/video/{video.uuid}/download/mp3",
+                    video_url=f"https://kick.com/{channel_name}/videos/{video.uuid}",
                     language=video.language,
                     uuid=video.uuid,
                     live_stream_id=video.live_stream_id
@@ -123,18 +123,25 @@ class KickService:
         Obtener información de un clip por ID
         
         Args:
-            clip_id: ID del clip
+            clip_id: ID del clip (puede incluir prefijo 'clip_')
             
         Returns:
             Diccionario con la información del clip
         """
         try:
+            # Intentar primero con el ID tal como viene
             clip = await asyncio.to_thread(self.kick_api.clip, clip_id)
             if not clip:
-                raise VideoNotFoundError(f"Clip '{clip_id}' not found")
+                # Si no funciona, intentar removiendo el prefijo 'clip_' si existe
+                if clip_id.startswith('clip_'):
+                    actual_clip_id = clip_id.replace('clip_', '')
+                    clip = await asyncio.to_thread(self.kick_api.clip, actual_clip_id)
+                
+                if not clip:
+                    raise VideoNotFoundError(f"Clip '{clip_id}' not found")
             
             return {
-                "id": clip.id,
+                "id": str(clip.id),
                 "title": clip.title if clip.title else "No title",
                 "duration": clip.duration,
                 "views": getattr(clip, 'views', 0),
@@ -143,48 +150,75 @@ class KickService:
                 "created_at": clip.created_at,
                 "thumbnail_url": clip.thumbnail,
                 "download_url": clip.stream,
-                "creator": clip.creator.username if clip.creator else None,
-                "category": clip.category.name if clip.category else None,
-                "channel": {
-                    "id": clip.channel.id,
-                    "username": clip.channel.username
-                } if clip.channel else None
+                "creator": getattr(clip.creator, 'username', None) if clip.creator else None,
+                "category": getattr(clip.category, 'name', None) if clip.category else None
             }
         
         except Exception as e:
             raise VideoNotFoundError(f"Error getting clip: {str(e)}")
     
-    async def get_video_by_id(self, video_id: str) -> dict:
+    async def get_video_by_uuid(self, uuid: str) -> dict:
         """
-        Obtener información de un vídeo por ID
+        Obtener información de un vídeo por UUID
         
         Args:
-            video_id: ID del vídeo
+            uuid: UUID del vídeo
             
         Returns:
             Diccionario con la información del vídeo
         """
         try:
-            video = await asyncio.to_thread(self.kick_api.video, video_id)
+            video = await asyncio.to_thread(self.kick_api.video, uuid)
             if not video:
-                raise VideoNotFoundError(f"Video '{video_id}' not found")
+                raise VideoNotFoundError(f"Video with UUID '{uuid}' not found")
             
             return {
-                "id": video.id,
+                "id": str(video.id),
                 "title": video.title if video.title else "No title",
                 "duration": video.duration,
                 "views": video.views,
                 "created_at": video.created_at,
                 "updated_at": video.updated_at,
-                "thumbnail": video.thumbnail,
+                "thumbnail": video.thumbnail.get('src') if isinstance(video.thumbnail, dict) else video.thumbnail,
                 "download_url": video.stream,
                 "language": video.language,
                 "uuid": video.uuid,
-                "live_stream_id": video.live_stream_id,
-                "channel": {
-                    "id": video.channel.id,
-                    "username": video.channel.username
-                } if video.channel else None
+                "live_stream_id": video.live_stream_id
+            }
+        
+        except Exception as e:
+            raise VideoNotFoundError(f"Error getting video: {str(e)}")
+
+    async def get_video_by_id(self, video_id: str) -> dict:
+        """
+        Obtener información de un vídeo por ID
+        
+        Args:
+            video_id: ID del vídeo (puede incluir prefijo 'video_')
+            
+        Returns:
+            Diccionario con la información del vídeo
+        """
+        try:
+            # Extraer el ID real si viene con prefijo 'video_'
+            actual_video_id = video_id.replace('video_', '') if video_id.startswith('video_') else video_id
+            
+            video = await asyncio.to_thread(self.kick_api.video, actual_video_id)
+            if not video:
+                raise VideoNotFoundError(f"Video '{video_id}' not found")
+            
+            return {
+                "id": str(video.id),
+                "title": video.title if video.title else "No title",
+                "duration": video.duration,
+                "views": video.views,
+                "created_at": video.created_at,
+                "updated_at": video.updated_at,
+                "thumbnail": video.thumbnail.get('src') if isinstance(video.thumbnail, dict) else video.thumbnail,
+                "download_url": video.stream,
+                "language": video.language,
+                "uuid": video.uuid,
+                "live_stream_id": video.live_stream_id
             }
         
         except Exception as e:
