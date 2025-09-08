@@ -84,6 +84,7 @@ Thumbs.db
 
 # Modelos de ML descargados
 models/
+!KickApi/app/models/
 *.pth
 *.pt
 *.onnx
