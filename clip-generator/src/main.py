@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+# from fastapi.staticfiles import StaticFiles  # Ya no necesario para clips
 import logging
 import uvicorn
 import os
@@ -34,9 +34,9 @@ app.add_middleware(
 # Incluir rutas
 app.include_router(router, prefix="/api/v1")
 
-# Montar archivos estáticos para servir clips
-if os.path.exists(settings.clips_output_dir):
-    app.mount("/clips/raw", StaticFiles(directory=settings.clips_output_dir), name="clips")
+# Comentado: No servir clips como archivos estáticos para ahorrar espacio
+# if os.path.exists(settings.clips_output_dir):
+#     app.mount("/clips/raw", StaticFiles(directory=settings.clips_output_dir), name="clips")
 
 @app.get("/")
 async def root():

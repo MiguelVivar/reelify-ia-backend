@@ -20,8 +20,8 @@ class Settings:
     clip_width: int = int(os.getenv("CLIP_WIDTH", "1080"))
     clip_height: int = int(os.getenv("CLIP_HEIGHT", "1920"))
 
-    # Almacenamiento de clips
-    clips_output_dir: str = os.getenv("CLIPS_OUTPUT_DIR", "/app/clips/raw")
+    # Almacenamiento temporal de clips (auto-limpieza)
+    temp_clips_expiry: int = int(os.getenv("TEMP_CLIPS_EXPIRY", "3600"))  # 1 hora por defecto
 
     # OpenRouter API Configuration
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")

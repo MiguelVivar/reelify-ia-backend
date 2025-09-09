@@ -5,7 +5,9 @@ class VideoRequest(BaseModel):
     video_url: str
 
 class ClipMetadata(BaseModel):
-    url: str
+    # Metadatos del clip con URL de acceso pero sin datos binarios
+    clip_id: str  # ID único del clip para referencia
+    url: str  # URL para acceder al clip bajo demanda
     start: float
     end: float
     duration: float

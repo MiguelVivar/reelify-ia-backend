@@ -1,7 +1,9 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Response
+from fastapi.responses import StreamingResponse, FileResponse
 from typing import List
 import logging
 import os
+import io
 from models import VideoRequest, ClipGenerationResponse, ErrorResponse
 from service import ClipGeneratorService
 from config import settings
@@ -47,7 +49,7 @@ async def generate_initial_clips(request: VideoRequest):
         return ClipGenerationResponse(
             status="success",
             clips=clips,
-            message=f"Se generaron {len(clips)} clips inteligentes usando {analysis_method}",
+            message=f"Se generaron {len(clips)} clips inteligentes usando {analysis_method} (acceso temporal)",
             analysis_method=analysis_method,
             total_video_duration=video_duration
         )
@@ -56,6 +58,37 @@ async def generate_initial_clips(request: VideoRequest):
         raise
     except Exception as e:
         logger.error(f"Error al generar clips: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno del servidor: {str(e)}"
+        )
+
+@router.get("/clips/{clip_id}")
+async def get_clip(clip_id: str):
+    """
+    Obtener un clip específico por su ID
+    """
+    try:
+        # Obtener la ruta del clip temporal
+        clip_path = service.file_service.get_temp_clip_path(clip_id)
+        
+        if not clip_path or not os.path.exists(clip_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Clip no encontrado o ya expirado"
+            )
+        
+        # Servir el archivo de video
+        return FileResponse(
+            clip_path,
+            media_type="video/mp4",
+            filename=f"{clip_id}.mp4"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al servir clip {clip_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error interno del servidor: {str(e)}"
@@ -89,3 +122,18 @@ async def get_analysis_info():
             "height": settings.clip_height
         }
     }
+
+@router.delete("/clips/cleanup")
+async def cleanup_temp_clips():
+    """
+    Limpiar clips temporales del servidor
+    """
+    try:
+        service.file_service.cleanup_temp_clips()
+        return {"message": "Clips temporales limpiados correctamente"}
+    except Exception as e:
+        logger.error(f"Error al limpiar clips temporales: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al limpiar clips: {str(e)}"
+        )

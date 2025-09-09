@@ -14,43 +14,10 @@ services:
       - SERVICE_PORT=8001
     volumes:
       - temp_storage:/tmp/video_processing
-      - clip_storage:/app/clips
     networks:
       - reelify-network
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-  # Clip Selector Microservice
-  clip-selector:
-    build:
-      context: ../clip-selector
-      dockerfile: Dockerfile
-    container_name: clip-selector
-    ports:
-      - "8002:8002"
-    environment:
-      - SERVICE_HOST=0.0.0.0
-      - SERVICE_PORT=8002
-      - LOG_LEVEL=INFO
-      - TEMP_DIR=/tmp/clip_processing
-      - WHISPER_MODEL=base
-      - WHISPER_DEVICE=cpu
-      - VIRAL_KEYWORDS=oferta,descuento,quiero,increíble,gratis,limitado,exclusivo,promoción,rebaja,outlet
-      - EMOTION_KEYWORDS=amor,odio,feliz,triste,enojado,sorprendido,emocionado,increíble,wow,genial
-      - MIN_VIRAL_SCORE=0.3
-      - CLIPS_INPUT_DIR=/app/clips/raw
-      - CLIPS_OUTPUT_DIR=/app/clips/viral
-    volumes:
-      - /tmp/clip_processing:/tmp/clip_processing
-      - clip_storage:/app/clips
-    networks:
-      - reelify-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8002/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -93,11 +60,8 @@ services:
     restart: unless-stopped
     depends_on:
       - clip-generator
-      - clip-selector
 
 volumes:
-  clip_storage:
-    driver: local
   temp_storage:
     driver: local
   kick_storage:

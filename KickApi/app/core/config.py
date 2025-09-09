@@ -43,7 +43,7 @@ class Config:
     
     # URLs de microservicios
     CLIP_GENERATOR_URL = os.getenv("CLIP_GENERATOR_URL", "http://clip-generator:8001")
-    CLIP_SELECTOR_URL = os.getenv("CLIP_SELECTOR_URL", "http://clip-selector:8002")
+    # CLIP_SELECTOR_URL eliminado - microservicio deprecado
     
     @classmethod
     def get_converted_videos_path(cls) -> str:

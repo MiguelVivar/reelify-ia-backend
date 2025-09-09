@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class VideoProcessingRequest(BaseModel):
-  """Modelo de solicitud para el pipeline completo de procesamiento de video"""
+  """Modelo de solicitud para el pipeline simplificado de procesamiento de video"""
   channel_name: str
   clip_count: int = 5
   quality: str = "medium"
   platform: str = "general"
   generate_clips: bool = True
-  select_viral: bool = True
+  # select_viral: bool = True  # Eliminado - clip-selector deprecado
 
 class ProcessingStatus(BaseModel):
   """Modelo de respuesta para el estado del procesamiento"""
@@ -38,8 +38,7 @@ async def get_microservices_status():
   """Obtener el estado de todos los microservicios del sistema"""
   services = {
     "kick-api": {"url": f"http://localhost:{Config.PORT}/health", "status": "unknown"},
-    "clip-generator": {"url": f"{Config.CLIP_GENERATOR_URL}/health", "status": "unknown"},
-    "clip-selector": {"url": f"{Config.CLIP_SELECTOR_URL}/health", "status": "unknown"}
+    "clip-generator": {"url": f"{Config.CLIP_GENERATOR_URL}/health", "status": "unknown"}
   }
   
   for service_name, service_info in services.items():
@@ -65,10 +64,9 @@ async def process_complete_pipeline(
   background_tasks: BackgroundTasks
 ):
   """
-  Pipeline completo de procesamiento de video:
+  Pipeline simplificado de procesamiento de video:
   1. Obtener clips de Kick.com
   2. Generar clips (clip-generator)
-  3. Seleccionar clips virales (clip-selector)
   """
   import uuid
   task_id = str(uuid.uuid4())
@@ -156,37 +154,12 @@ async def process_pipeline_background(task_id: str, request: VideoProcessingRequ
           logger.error(f"Error al generar clips para el video {i+1}: {str(e)}")
         
         # Actualizar progreso
-        progress = 50.0 + (i + 1) / len(video_urls) * 20.0
+        progress = 50.0 + (i + 1) / len(video_urls) * 50.0  # Ahora va hasta 100%
         processing_tasks[task_id].progress = progress
       
       processing_tasks[task_id].results["clip_generation"] = clip_generation_results
     
-    if request.select_viral:
-      # Paso 3: Seleccionar clips virales usando clip-selector
-      processing_tasks[task_id].message = "Seleccionando clips virales con clip-selector"
-      processing_tasks[task_id].progress = 80.0
-      
-      try:
-        response = requests.post(
-          f"{Config.CLIP_SELECTOR_URL}/api/clips/analyze-viral",
-          json={
-            "clips_data": clips_data["clips"],
-            "viral_threshold": 0.3,
-            "max_clips": request.clip_count
-          },
-          timeout=180
-        )
-        
-        if response.status_code == 200:
-          viral_analysis = response.json()
-          processing_tasks[task_id].results["viral_analysis"] = viral_analysis
-        else:
-          logger.warning(f"No se pudo analizar la viralidad de los clips: {response.text}")
-      
-      except Exception as e:
-        logger.error(f"Error al analizar la viralidad de los clips: {str(e)}")
-    
-    # Completar la tarea
+    # Completar la tarea (clip-selector eliminado)
     processing_tasks[task_id].status = "completed"
     processing_tasks[task_id].message = "Pipeline completado exitosamente"
     processing_tasks[task_id].progress = 100.0

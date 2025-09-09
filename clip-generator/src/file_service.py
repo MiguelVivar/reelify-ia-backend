@@ -3,6 +3,7 @@ import uuid
 import logging
 import aiohttp
 import aiofiles
+import shutil
 from urllib.parse import urlparse
 from config import settings
 
@@ -10,8 +11,11 @@ logger = logging.getLogger(__name__)
 
 class FileDownloadService:
     def __init__(self):
-        self.clips_output_dir = getattr(settings, 'clips_output_dir', '/app/clips/raw')
-        os.makedirs(self.clips_output_dir, exist_ok=True)
+        # Directorio temporal para clips (se auto-limpia)
+        self.temp_clips_dir = os.path.join(settings.temp_dir, "clips")
+        os.makedirs(self.temp_clips_dir, exist_ok=True)
+        # Diccionario para rastrear clips temporales
+        self.temp_clips = {}
         
     async def download_video(self, video_url: str) -> str:
         """
@@ -44,44 +48,62 @@ class FileDownloadService:
             logger.error(f"Error al descargar video: {e}")
             raise
     
-    async def save_clip(self, clip_path: str, clip_id: str) -> str:
+    async def save_clip_temporary(self, clip_path: str, clip_id: str) -> str:
         """
-        Guardar el clip generado en el almacenamiento persistente y devolver la URL o ruta del clip.
+        Guardar clip temporalmente y devolver URL de acceso
         """
         try:
-            # Crear el nombre del archivo del clip
             clip_filename = f"{clip_id}.mp4"
-            output_path = os.path.join(self.clips_output_dir, clip_filename)
-
-            # Asegurarse de que el directorio de salida exista
-            os.makedirs(self.clips_output_dir, exist_ok=True)
-
-            # Copiar el archivo al almacenamiento persistente
-            async with aiofiles.open(clip_path, 'rb') as src:
-                async with aiofiles.open(output_path, 'wb') as dst:
-                    async for chunk in src:
-                        await dst.write(chunk)
+            temp_clip_path = os.path.join(self.temp_clips_dir, clip_filename)
             
-            # Retornar la ruta relativa del clip
-            clip_url = f"/clips/raw/{clip_filename}"
-            logger.info(f"Clip guardado en: {output_path}")
-
+            # Copiar el archivo al directorio temporal
+            shutil.copy2(clip_path, temp_clip_path)
+            
+            # Registrar en el diccionario temporal
+            self.temp_clips[clip_id] = temp_clip_path
+            
+            # Retornar URL para acceder al clip
+            clip_url = f"/api/v1/clips/{clip_id}"
+            logger.info(f"Clip guardado temporalmente: {temp_clip_path}")
+            
             return clip_url
             
         except Exception as e:
-            logger.error(f"Error al guardar clip: {e}")
+            logger.error(f"Error al guardar clip temporal: {e}")
             raise
     
-    def get_clip_binary_data(self, clip_path: str) -> bytes:
+    def get_temp_clip_path(self, clip_id: str) -> str:
+        """
+        Obtener la ruta del clip temporal por su ID
+        """
+        return self.temp_clips.get(clip_id)
+    
+    async def get_clip_binary_data(self, clip_path: str) -> bytes:
         """
         Obtener los datos binarios de un archivo de clip
         """
         try:
-            with open(clip_path, 'rb') as f:
-                return f.read()
+            async with aiofiles.open(clip_path, 'rb') as f:
+                return await f.read()
         except Exception as e:
             logger.error(f"Error al leer los datos binarios del clip: {e}")
             raise
+    
+    def cleanup_temp_clips(self):
+        """
+        Limpiar clips temporales
+        """
+        try:
+            for clip_id, path in list(self.temp_clips.items()):
+                if os.path.exists(path):
+                    os.remove(path)
+                    logger.debug(f"Clip temporal limpiado: {path}")
+                del self.temp_clips[clip_id]
+        except Exception as e:
+            logger.warning(f"Error al limpiar clips temporales: {e}")
+    
+    # MÉTODO ELIMINADO: save_clip ya no guarda clips permanentemente
+    # Los clips ahora se sirven temporalmente bajo demanda
     
     def cleanup_temp_file(self, file_path: str):
         """Limpiar archivo temporal"""

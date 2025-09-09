@@ -58,11 +58,12 @@ class ClipGeneratorService:
                 )
                 
                 if success and os.path.exists(temp_clip_path):
-                    # Guardar clip en almacenamiento persistente
-                    clip_url = await self.file_service.save_clip(temp_clip_path, clip_id)
-
-                    # Crear metadatos con información de formato y análisis IA
+                    # Guardar clip temporalmente y obtener URL de acceso
+                    clip_url = await self.file_service.save_clip_temporary(temp_clip_path, clip_id)
+                    
+                    # Crear metadatos con URL de acceso temporal
                     clip_metadata = ClipMetadata(
+                        clip_id=clip_id,
                         url=clip_url,
                         start=start_time,
                         end=end_time,
@@ -75,14 +76,14 @@ class ClipGeneratorService:
                     )
                     clips_metadata.append(clip_metadata)
 
-                    # Limpiar archivo temporal
+                    # Limpiar archivo temporal original (ya está copiado)
                     self.file_service.cleanup_temp_file(temp_clip_path)
 
-                    logger.info(f"Clip {i+1} creado y guardado correctamente: {clip_url}")
+                    logger.info(f"Clip {i+1} procesado correctamente: {clip_url}")
                 else:
                     logger.warning(f"No se pudo crear el clip {i+1}")
 
-            logger.info(f"Proceso completado: {len(clips_metadata)} clips generados usando {analysis_method}")
+            logger.info(f"Proceso completado: {len(clips_metadata)} clips generados usando {analysis_method} (acceso temporal)")
             
             return clips_metadata, analysis_method, video_duration
             
