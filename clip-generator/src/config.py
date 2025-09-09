@@ -13,10 +13,10 @@ if env_file.exists():
 class Settings:
     # Procesamiento de video
     temp_dir: str = os.getenv("TEMP_DIR", "/tmp/video_processing")
-    max_clip_duration: int = int(os.getenv("MAX_CLIP_DURATION", "180"))
-    min_clip_duration: int = int(os.getenv("MIN_CLIP_DURATION", "15"))
+    max_clip_duration: int = int(os.getenv("MAX_CLIP_DURATION", "75"))  # Reducido para viral
+    min_clip_duration: int = int(os.getenv("MIN_CLIP_DURATION", "20"))  # Aumentado para engagement
     
-    # Dimensiones de los clips
+    # Dimensiones de los clips optimizadas para móvil
     clip_width: int = int(os.getenv("CLIP_WIDTH", "1080"))
     clip_height: int = int(os.getenv("CLIP_HEIGHT", "1920"))
 
@@ -28,10 +28,31 @@ class Settings:
     openrouter_base_url: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-chat")
     
-    # Video Analysis Configuration
-    analysis_segment_duration: int = int(os.getenv("ANALYSIS_SEGMENT_DURATION", "30"))
-    max_analysis_segments: int = int(os.getenv("MAX_ANALYSIS_SEGMENTS", "20"))
-    highlight_threshold: float = float(os.getenv("HIGHLIGHT_THRESHOLD", "0.7"))
+    # Video Analysis Configuration - Optimizado para viralidad
+    analysis_segment_duration: int = int(os.getenv("ANALYSIS_SEGMENT_DURATION", "30"))  # Segmentos más cortos para precisión
+    max_analysis_segments: int = int(os.getenv("MAX_ANALYSIS_SEGMENTS", "40"))  # Más segmentos para análisis detallado
+    highlight_threshold: float = float(os.getenv("HIGHLIGHT_THRESHOLD", "0.8"))  # Threshold más alto para máxima selectividad
+    
+    # Configuración avanzada para análisis viral
+    viral_score_threshold: float = float(os.getenv("VIRAL_SCORE_THRESHOLD", "0.75"))  # Score mínimo para consideración viral
+    max_clips_per_video: int = int(os.getenv("MAX_CLIPS_PER_VIDEO", "3"))  # Máximo clips por video para selectividad
+    min_clip_separation_seconds: int = int(os.getenv("MIN_CLIP_SEPARATION_SECONDS", "120"))  # Separación mínima entre clips
+    
+    # Duración óptima para contenido viral (rangos)
+    optimal_viral_duration_min: int = int(os.getenv("OPTIMAL_VIRAL_DURATION_MIN", "25"))
+    optimal_viral_duration_max: int = int(os.getenv("OPTIMAL_VIRAL_DURATION_MAX", "45"))
+    
+    # Configuración de engagement y retención
+    hook_analysis_duration: int = int(os.getenv("HOOK_ANALYSIS_DURATION", "5"))  # Primeros N segundos para analizar hook
+    retention_target_percentage: float = float(os.getenv("RETENTION_TARGET_PERCENTAGE", "0.8"))  # Target de retención
+    
+    # Pesos para algoritmo de scoring viral
+    emotional_weight: float = float(os.getenv("EMOTIONAL_WEIGHT", "0.25"))
+    engagement_weight: float = float(os.getenv("ENGAGEMENT_WEIGHT", "0.20"))
+    shareability_weight: float = float(os.getenv("SHAREABILITY_WEIGHT", "0.20"))
+    hook_weight: float = float(os.getenv("HOOK_WEIGHT", "0.15"))
+    memorability_weight: float = float(os.getenv("MEMORABILITY_WEIGHT", "0.10"))
+    retention_weight: float = float(os.getenv("RETENTION_WEIGHT", "0.10"))
 
     # Configuración del servicio
     service_name: str = os.getenv("SERVICE_NAME", "clip-generator")
