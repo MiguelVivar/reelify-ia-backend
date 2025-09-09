@@ -1,7 +1,16 @@
 import os
-from pydantic import BaseSettings
+from pathlib import Path
 
-class Settings(BaseSettings):
+# Cargar variables de entorno desde .env si existe
+env_file = Path(__file__).parent.parent / ".env"
+if env_file.exists():
+    with open(env_file) as f:
+        for line in f:
+            if line.strip() and not line.startswith('#'):
+                key, value = line.strip().split('=', 1)
+                os.environ.setdefault(key, value)
+
+class Settings:
     # Procesamiento de video
     temp_dir: str = os.getenv("TEMP_DIR", "/tmp/video_processing")
     max_clip_duration: int = int(os.getenv("MAX_CLIP_DURATION", "180"))
@@ -31,8 +40,5 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    
-    class Config:
-        env_file = ".env"
 
 settings = Settings()

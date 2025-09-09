@@ -30,20 +30,16 @@ async def generate_initial_clips(request: VideoRequest):
                 detail="URL de video no válida proporcionada"
             )
         
-        # Verificar configuración de API
-        analysis_method = "deepseek_ai" if settings.openrouter_api_key else "fallback"
-        if not settings.openrouter_api_key:
-            logger.warning("API key de OpenRouter no configurada, usando análisis de respaldo")
-        
         # Generate clips with AI analysis
-        clips = await service.generate_clips(request)
+        clips, analysis_method, video_duration = await service.generate_clips(request)
         
         if not clips:
             return ClipGenerationResponse(
                 status="warning",
                 clips=[],
                 message="No se generaron clips del video proporcionado",
-                analysis_method=analysis_method
+                analysis_method=analysis_method,
+                total_video_duration=video_duration
             )
 
         logger.info(f"Se generaron correctamente {len(clips)} clips usando {analysis_method}")
@@ -52,7 +48,8 @@ async def generate_initial_clips(request: VideoRequest):
             status="success",
             clips=clips,
             message=f"Se generaron {len(clips)} clips inteligentes usando {analysis_method}",
-            analysis_method=analysis_method
+            analysis_method=analysis_method,
+            total_video_duration=video_duration
         )
         
     except HTTPException:

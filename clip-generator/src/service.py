@@ -1,7 +1,7 @@
 import os
 import uuid
 import logging
-from typing import List
+from typing import List, Tuple
 from file_service import FileDownloadService
 from video_processor import VideoProcessor
 from models import ClipMetadata, VideoRequest
@@ -14,7 +14,7 @@ class ClipGeneratorService:
         self.file_service = FileDownloadService()
         self.video_processor = VideoProcessor()
     
-    async def generate_clips(self, request: VideoRequest) -> List[ClipMetadata]:
+    async def generate_clips(self, request: VideoRequest) -> Tuple[List[ClipMetadata], str, float]:
         """Genera clips a partir de un video analizando todo el contenido con IA."""
         
         video_id = str(uuid.uuid4())
@@ -27,24 +27,32 @@ class ClipGeneratorService:
 
             # 2. Analizar todo el video con Deepseek IA para detectar los mejores momentos
             logger.info("Analizando video completo con IA para identificar mejores momentos...")
-            highlights = await self.video_processor.detect_highlights(temp_video_path)
+            highlights_data = await self.video_processor.detect_highlights_with_metadata(temp_video_path)
             
-            if not highlights:
+            if not highlights_data:
                 raise Exception("No se detectaron puntos destacados en el video")
 
             # 3. Obtener información del análisis para el response
-            analysis_method = "deepseek_ai" if settings.openrouter_api_key else "fallback"
+            analysis_method = self.video_processor.get_last_analysis_method()
             video_duration = await self.video_processor._get_video_duration(temp_video_path)
 
             # 4. Crear clips y guardarlos localmente
             clips_metadata = []
             
-            for i, (start_time, end_time) in enumerate(highlights):
+            for i, highlight_data in enumerate(highlights_data):
+                start_time = highlight_data.get("start", 0.0)
+                end_time = highlight_data.get("end", 0.0)
+                ai_score = highlight_data.get("score")
+                ai_reason = highlight_data.get("reason", f"Momento destacado {i+1} identificado por IA")
+                
+                # Log para debug
+                logger.info(f"Procesando highlight {i+1}: start={start_time:.2f}, end={end_time:.2f}, score={ai_score}, reason={ai_reason[:50]}...")
+                
                 clip_id = f"clip_{video_id}_{i+1}"
                 temp_clip_path = os.path.join(settings.temp_dir, f"{clip_id}.mp4")
 
                 # Crear clip
-                logger.info(f"Generando clip {i+1}/{len(highlights)}: {start_time:.2f}s - {end_time:.2f}s")
+                logger.info(f"Generando clip {i+1}/{len(highlights_data)}: {start_time:.2f}s - {end_time:.2f}s")
                 success = await self.video_processor.create_clip(
                     temp_video_path, start_time, end_time, temp_clip_path
                 )
@@ -62,8 +70,8 @@ class ClipGeneratorService:
                         width=settings.clip_width,
                         height=settings.clip_height,
                         format="vertical",
-                        ai_score=None,  # Se puede agregar si el analyzer devuelve scores
-                        ai_reason=f"Momento destacado {i+1} identificado por IA"
+                        ai_score=ai_score,
+                        ai_reason=ai_reason
                     )
                     clips_metadata.append(clip_metadata)
 
@@ -75,7 +83,8 @@ class ClipGeneratorService:
                     logger.warning(f"No se pudo crear el clip {i+1}")
 
             logger.info(f"Proceso completado: {len(clips_metadata)} clips generados usando {analysis_method}")
-            return clips_metadata
+            
+            return clips_metadata, analysis_method, video_duration
             
         except Exception as e:
             logger.error(f"Error en la generación de clips: {e}")

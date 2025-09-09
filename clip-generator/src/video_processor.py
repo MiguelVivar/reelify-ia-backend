@@ -4,7 +4,7 @@ import logging
 import ffmpeg
 import subprocess
 import json
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from config import settings
 from deepseek_analyzer import DeepseekVideoAnalyzer
 
@@ -14,45 +14,62 @@ class VideoProcessor:
     def __init__(self):
         self.temp_dir = settings.temp_dir
         self.deepseek_analyzer = DeepseekVideoAnalyzer()
+        self.last_analysis_method = "unknown"
         os.makedirs(self.temp_dir, exist_ok=True)
     
-    async def detect_highlights(self, video_path: str) -> List[Tuple[float, float]]:
+    async def detect_highlights_with_metadata(self, video_path: str) -> List[Dict]:
         """
-        Detecta los momentos destacados usando Deepseek AI para análisis inteligente
-        Retorna una lista de tuplas (start_time, end_time)
+        Detecta los momentos destacados usando Deepseek AI y retorna metadatos completos
+        Retorna una lista de diccionarios con start, end, score, reason
         """
         try:
-            logger.info(f"Iniciando detección de highlights con IA para: {video_path}")
+            logger.info(f"Iniciando detección de highlights con metadatos para: {video_path}")
             
             # Obtener la duración del video
             duration = await self._get_video_duration(video_path)
             
             if duration <= 0:
                 logger.warning("No se pudo obtener la duración del video o es inválida")
+                self.last_analysis_method = "error"
                 return []
             
             logger.info(f"Video duration: {duration:.2f}s - Analizando con Deepseek...")
             
             # Usar Deepseek para análisis inteligente de highlights
-            highlights = await self.deepseek_analyzer.analyze_video_highlights(video_path)
+            if settings.openrouter_api_key:
+                logger.info("API key de OpenRouter configurada, usando análisis Deepseek")
+                highlights_data = await self.deepseek_analyzer.analyze_video_highlights_with_metadata(video_path)
+                if highlights_data:
+                    self.last_analysis_method = "deepseek_ai"
+                    logger.info(f"Deepseek analysis completado: {len(highlights_data)} highlights con metadatos")
+                    for i, highlight in enumerate(highlights_data):
+                        logger.info(f"  Highlight {i+1}: {highlight['start']:.2f}s - {highlight['end']:.2f}s "
+                                   f"(score: {highlight.get('score', 0):.2f}, reason: {highlight.get('reason', 'N/A')[:50]}...)")
+                    return highlights_data
+                else:
+                    logger.warning("Deepseek no retornó datos, usando análisis de respaldo")
+            else:
+                logger.warning("API key de OpenRouter no configurada, usando análisis de respaldo")
 
-            if not highlights:
-                logger.warning("Deepseek no encontró highlights, usando análisis de respaldo")
-                highlights = self._create_simple_segments(duration)
-
-            logger.info(f"Detección completada: {len(highlights)} highlights identificados")
-            for i, (start, end) in enumerate(highlights):
-                logger.info(f"  Highlight {i+1}: {start:.2f}s - {end:.2f}s (duración: {end-start:.2f}s)")
+            # Fallback a análisis simple
+            simple_highlights = self._create_simple_segments_with_metadata(duration)
+            self.last_analysis_method = "fallback"
             
-            return highlights
+            logger.info(f"Análisis fallback completado: {len(simple_highlights)} highlights")
+            return simple_highlights
             
         except Exception as e:
-            logger.error(f"Error detectando puntos destacados: {e}")
+            logger.error(f"Error detectando puntos destacados con metadatos: {e}")
+            self.last_analysis_method = "error"
             # Fallback a análisis simple
             duration = await self._get_video_duration(video_path)
             if duration > 0:
-                return self._create_simple_segments(duration)
+                return self._create_simple_segments_with_metadata(duration)
             return []
+
+    def get_last_analysis_method(self) -> str:
+        """Retorna el método de análisis usado en la última operación"""
+        return self.last_analysis_method
     
     async def _get_video_duration(self, video_path: str) -> float:
         """Obtener la duración del video usando FFprobe"""
@@ -164,6 +181,57 @@ class VideoProcessor:
             current_time += max_clip_duration * 0.9  # 10% overlap
 
         logger.info(f"Se crearon {len(segments)} segmentos a partir del video de {duration:.2f}s")
+        return segments
+
+    def _create_simple_segments_with_metadata(self, duration: float) -> List[Dict]:
+        """Crea segmentos simples con metadatos basados en la duración del video"""
+        
+        segments = []
+        max_clip_duration = settings.max_clip_duration
+        min_clip_duration = settings.min_clip_duration
+
+        logger.info(f"Creando segmentos con metadatos para duración: {duration:.2f}s "
+                   f"(min: {min_clip_duration}s, max: {max_clip_duration}s)")
+        
+        # Si la duración es menor que la mínima, no crear clips
+        if duration < min_clip_duration:
+            logger.warning(f"Video demasiado corto ({duration:.2f}s < {min_clip_duration}s), omitiendo")
+            return segments
+
+        # Si el video es más corto que la duración máxima del clip, devolver el video completo
+        if duration <= max_clip_duration:
+            segments.append({
+                "start": 0.0,
+                "end": duration,
+                "score": 0.6,
+                "reason": "Video completo (duración adecuada para clip único)"
+            })
+            logger.info(f"Video cabe en un solo clip: 0.0s - {duration:.2f}s")
+            return segments
+
+        # Crear múltiples segmentos de max_clip_duration
+        current_time = 0.0
+        segment_count = 0
+        
+        while current_time < duration and segment_count < 10:  # Maximo 10 segmentos
+            end_time = min(current_time + max_clip_duration, duration)
+
+            # Solo agregar segmento si cumple con la duración mínima
+            if end_time - current_time >= min_clip_duration:
+                segments.append({
+                    "start": current_time,
+                    "end": end_time,
+                    "score": 0.5,  # Score básico para segmentos fallback
+                    "reason": f"Segmento {segment_count + 1} - análisis automático"
+                })
+                logger.info(f"Agregado segmento {segment_count + 1}: {current_time:.2f}s - {end_time:.2f}s "
+                           f"(duración: {end_time - current_time:.2f}s)")
+                segment_count += 1
+            
+            # Mover el tiempo actual, con un pequeño solapamiento para continuidad
+            current_time += max_clip_duration * 0.9  # 10% overlap
+
+        logger.info(f"Se crearon {len(segments)} segmentos con metadatos a partir del video de {duration:.2f}s")
         return segments
     
     async def create_clip(self, video_path: str, start_time: float, end_time: float, output_path: str) -> bool:

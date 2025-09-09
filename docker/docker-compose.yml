@@ -7,26 +7,13 @@ services:
     container_name: clip-generator
     ports:
       - "8001:8001"
+    env_file:
+      - ../clip-generator/.env
     environment:
       - SERVICE_HOST=0.0.0.0
       - SERVICE_PORT=8001
-      - LOG_LEVEL=INFO
-      - TEMP_DIR=/tmp/video_processing
-      - MAX_CLIP_DURATION=20
-      - MIN_CLIP_DURATION=15
-      - CLIPS_OUTPUT_DIR=/app/clips/raw
-      - CLIP_WIDTH=1080
-      - CLIP_HEIGHT=1920
-      # OpenRouter API Configuration
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
-      - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-      - DEEPSEEK_MODEL=deepseek/deepseek-chat
-      # Video Analysis Configuration
-      - ANALYSIS_SEGMENT_DURATION=30
-      - MAX_ANALYSIS_SEGMENTS=20
-      - HIGHLIGHT_THRESHOLD=0.7
     volumes:
-      - /tmp/video_processing:/tmp/video_processing
+      - temp_storage:/tmp/video_processing
       - clip_storage:/app/clips
     networks:
       - reelify-network
@@ -110,6 +97,8 @@ services:
 
 volumes:
   clip_storage:
+    driver: local
+  temp_storage:
     driver: local
   kick_storage:
     driver: local
