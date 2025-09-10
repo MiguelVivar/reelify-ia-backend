@@ -140,6 +140,14 @@ class KickService:
                 if not clip:
                     raise VideoNotFoundError(f"Clip '{clip_id}' not found")
             
+            # Limpiar la URL de stream de caracteres especiales
+            stream_url = clip.stream
+            if stream_url:
+                # Remover caracteres invisibles comunes
+                for char in ['\u2060', '\u200B', '\u200C', '\u200D', '\uFEFF']:
+                    stream_url = stream_url.replace(char, '')
+                stream_url = stream_url.strip()
+            
             return {
                 "id": str(clip.id),
                 "title": clip.title if clip.title else "No title",
@@ -149,7 +157,7 @@ class KickService:
                 "likes": getattr(clip, 'likes', 0),
                 "created_at": clip.created_at,
                 "thumbnail_url": clip.thumbnail,
-                "download_url": clip.stream,
+                "download_url": stream_url,
                 "creator": getattr(clip.creator, 'username', None) if clip.creator else None,
                 "category": getattr(clip.category, 'name', None) if clip.category else None
             }
@@ -172,6 +180,14 @@ class KickService:
             if not video:
                 raise VideoNotFoundError(f"Video with UUID '{uuid}' not found")
             
+            # Limpiar la URL de stream de caracteres especiales
+            stream_url = video.stream
+            if stream_url:
+                # Remover caracteres invisibles comunes
+                for char in ['\u2060', '\u200B', '\u200C', '\u200D', '\uFEFF']:
+                    stream_url = stream_url.replace(char, '')
+                stream_url = stream_url.strip()
+            
             return {
                 "id": str(video.id),
                 "title": video.title if video.title else "No title",
@@ -180,7 +196,7 @@ class KickService:
                 "created_at": video.created_at,
                 "updated_at": video.updated_at,
                 "thumbnail": video.thumbnail.get('src') if isinstance(video.thumbnail, dict) else video.thumbnail,
-                "download_url": video.stream,
+                "download_url": stream_url,
                 "language": video.language,
                 "uuid": video.uuid,
                 "live_stream_id": video.live_stream_id
@@ -207,6 +223,14 @@ class KickService:
             if not video:
                 raise VideoNotFoundError(f"Video '{video_id}' not found")
             
+            # Limpiar la URL de stream de caracteres especiales
+            stream_url = video.stream
+            if stream_url:
+                # Remover caracteres invisibles comunes
+                for char in ['\u2060', '\u200B', '\u200C', '\u200D', '\uFEFF']:
+                    stream_url = stream_url.replace(char, '')
+                stream_url = stream_url.strip()
+            
             return {
                 "id": str(video.id),
                 "title": video.title if video.title else "No title",
@@ -215,7 +239,7 @@ class KickService:
                 "created_at": video.created_at,
                 "updated_at": video.updated_at,
                 "thumbnail": video.thumbnail.get('src') if isinstance(video.thumbnail, dict) else video.thumbnail,
-                "download_url": video.stream,
+                "download_url": stream_url,
                 "language": video.language,
                 "uuid": video.uuid,
                 "live_stream_id": video.live_stream_id

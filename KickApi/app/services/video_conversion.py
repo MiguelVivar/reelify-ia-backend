@@ -5,6 +5,7 @@ import subprocess
 import asyncio
 import os
 import time
+import urllib.request
 from typing import Dict, Any, Optional
 from app.core.config import Config, QUALITY_SETTINGS, PLATFORM_MAPPINGS
 from app.services.video_analysis import VideoAnalysisService
@@ -14,6 +15,29 @@ from app.core.exceptions import ConversionError
 
 class VideoConversionService:
     """Servicio para la conversión de formatos de vídeo"""
+    
+    @staticmethod
+    async def _test_m3u8_url(url: str) -> bool:
+        """Probar si la URL M3U8 es accesible"""
+        try:
+            print(f"🔍 Probando accesibilidad de URL M3U8...")
+            
+            def test_url():
+                try:
+                    req = urllib.request.Request(url, method='HEAD')
+                    req.add_header('User-Agent', 'Mozilla/5.0 (compatible; KickAPI/1.0)')
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        return response.status == 200
+                except:
+                    return False
+            
+            # Ejecutar en thread para no bloquear
+            accessible = await asyncio.to_thread(test_url)
+            print(f"📡 URL {'✅ Accesible' if accessible else '❌ No accesible'}")
+            return accessible
+        except Exception as e:
+            print(f"❌ Error probando URL: {str(e)}")
+            return False
     
     @staticmethod
     def optimize_for_platform(quality: str, platform: str) -> str:
@@ -396,18 +420,82 @@ class VideoConversionService:
             return False
     
     @staticmethod
+    @staticmethod
     async def convert_m3u8_to_mp4(m3u8_url: str, output_path: str) -> bool:
         """Convertir stream M3U8 a MP4"""
-        cmd = [
-            'ffmpeg', '-i', m3u8_url, 
-            '-c', 'copy', '-bsf:a', 'aac_adtstoasc', 
-            '-f', 'mp4', output_path, '-y'
-        ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await process.communicate()
-        return process.returncode == 0
+        try:
+            print(f"🎬 Iniciando conversión M3U8 a MP4...")
+            
+            # Limpiar la URL de caracteres especiales más agresivamente
+            cleaned_url = m3u8_url.strip()
+            # Remover caracteres invisibles comunes
+            for char in ['\u2060', '\u200B', '\u200C', '\u200D', '\uFEFF']:
+                cleaned_url = cleaned_url.replace(char, '')
+            cleaned_url = cleaned_url.strip()
+            
+            print(f"📥 URL original: {repr(m3u8_url)}")
+            print(f"📥 URL limpia: {cleaned_url}")
+            print(f"📤 Archivo de salida: {output_path}")
+            
+            # Verificar que la URL sea válida
+            if not cleaned_url.startswith(('http://', 'https://')):
+                print(f"❌ URL inválida: {cleaned_url}")
+                return False
+            
+            # Probar la URL antes de intentar la conversión
+            url_accessible = await VideoConversionService._test_m3u8_url(cleaned_url)
+            if not url_accessible:
+                print("❌ La URL M3U8 no es accesible")
+                return False
+            
+            cmd = [
+                'ffmpeg', '-i', cleaned_url, 
+                '-c', 'copy', '-bsf:a', 'aac_adtstoasc', 
+                '-f', 'mp4', output_path, '-y'
+            ]
+            
+            print(f"🔧 Ejecutando comando: {' '.join(cmd)}")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            
+            print("⏳ Esperando que termine el proceso de conversión...")
+            
+            # Reducir timeout a 2 minutos - si tarda más, probablemente hay un problema
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
+            except asyncio.TimeoutError:
+                print("⏰ Timeout: El proceso de conversión tardó más de 2 minutos")
+                process.kill()
+                await process.wait()
+                return False
+            
+            success = process.returncode == 0
+            
+            if success:
+                print(f"✅ Conversión M3U8 a MP4 completada exitosamente")
+                if os.path.exists(output_path):
+                    file_size = os.path.getsize(output_path)
+                    print(f"📁 Tamaño del archivo generado: {file_size} bytes")
+                    if file_size == 0:
+                        print("❌ El archivo generado está vacío")
+                        return False
+                else:
+                    print("❌ El archivo de salida no existe")
+                    return False
+            else:
+                print(f"❌ Error en la conversión M3U8 a MP4. Código de retorno: {process.returncode}")
+                if stderr:
+                    error_msg = stderr.decode('utf-8', errors='ignore')[:2000]  # Aumentar un poco para ver más detalles
+                    print(f"🔍 Error detallado de FFmpeg:")
+                    print(error_msg)
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ Excepción durante la conversión M3U8 a MP4: {str(e)}")
+            return False
     
     @staticmethod
     def _convert_with_subtitles_simple(input_path: str, output_path: str, subtitle_file: str, quality: str = "medium") -> bool:
@@ -475,18 +563,64 @@ class VideoConversionService:
             return VideoConversionService._convert_simple_fallback(input_path, output_path, quality)
 
     @staticmethod
+    @staticmethod
     async def convert_m3u8_to_mp3(m3u8_url: str, output_path: str) -> bool:
         """Convertir stream M3U8 a MP3"""
-        cmd = [
-            'ffmpeg', '-i', m3u8_url, 
-            '-vn', '-acodec', 'mp3', '-ab', '192k', 
-            output_path, '-y'
-        ]
-        process = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await process.communicate()
-        return process.returncode == 0
+        try:
+            print(f"🎵 Iniciando conversión M3U8 a MP3...")
+            
+            # Limpiar la URL de caracteres especiales
+            cleaned_url = m3u8_url.strip().rstrip('\u2060').rstrip()  # Remover caracteres invisibles
+            print(f"📥 URL de entrada: {cleaned_url}")
+            print(f"📤 Archivo de salida: {output_path}")
+            
+            cmd = [
+                'ffmpeg', '-i', cleaned_url, 
+                '-vn', '-acodec', 'mp3', '-ab', '192k', 
+                output_path, '-y'
+            ]
+            
+            print(f"🔧 Ejecutando comando: {' '.join(cmd)}")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            
+            print("⏳ Esperando que termine el proceso de conversión...")
+            
+            # Añadir timeout de 5 minutos para evitar que se cuelgue indefinidamente
+            try:
+                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                print("⏰ Timeout: El proceso de conversión tardó más de 5 minutos")
+                process.kill()
+                await process.wait()
+                return False
+            
+            success = process.returncode == 0
+            
+            if success:
+                print(f"✅ Conversión M3U8 a MP3 completada exitosamente")
+                if os.path.exists(output_path):
+                    file_size = os.path.getsize(output_path)
+                    print(f"📁 Tamaño del archivo generado: {file_size} bytes")
+                    if file_size == 0:
+                        print("❌ El archivo generado está vacío")
+                        return False
+                else:
+                    print("❌ El archivo de salida no existe")
+                    return False
+            else:
+                print(f"❌ Error en la conversión M3U8 a MP3. Código de retorno: {process.returncode}")
+                if stderr:
+                    error_msg = stderr.decode('utf-8', errors='ignore')[:1000]  # Limitar longitud del error
+                    print(f"🔍 Error detallado: {error_msg}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ Excepción durante la conversión M3U8 a MP3: {str(e)}")
+            return False
 
     @staticmethod
     def _convert_with_split(

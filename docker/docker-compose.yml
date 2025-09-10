@@ -61,12 +61,43 @@ services:
     depends_on:
       - clip-generator
 
+  # Video Downloader Microservice
+  video-downloader:
+    build:
+      context: ../video-downloader
+      dockerfile: Dockerfile
+    container_name: video-downloader
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_HOST=0.0.0.0
+      - SERVICE_PORT=8002
+      - NODE_ENV=production
+      - DOWNLOADS_DIR=/app/downloads
+      - CLEANUP_INTERVAL_MINUTES=30
+      - FILE_RETENTION_HOURS=1
+    volumes:
+      - video_downloads:/app/downloads
+    networks:
+      - reelify-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    depends_on:
+      - clip-generator
+      - kick-api
+
 volumes:
   temp_storage:
     driver: local
   kick_storage:
     driver: local
   kick_temp:
+    driver: local
+  video_downloads:
     driver: local
 
 networks:

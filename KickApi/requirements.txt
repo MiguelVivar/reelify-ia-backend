@@ -6,6 +6,7 @@ moviepy==1.0.3
 requests==2.31.0
 Pillow==9.5.0
 psutil==5.9.6
+httpx==0.25.0
 
 # Nuevas dependencias para funcionalidades avanzadas
 openai-whisper==20231117  # Para subtítulos automáticos con IA
