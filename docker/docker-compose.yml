@@ -12,15 +12,22 @@ services:
     environment:
       - SERVICE_HOST=0.0.0.0
       - SERVICE_PORT=8001
+      - TEMP_DIR=/tmp/video_processing_host  # Usar directorio del host
+      - DOWNLOAD_CHUNK_SIZE=524288       # 512KB chunks (más estable para archivos grandes)
+      - MAX_VIDEO_SIZE_MB=5120           # 5GB máximo
+      - PROGRESS_LOG_INTERVAL=50         # Log cada 50MB
+      - LOG_LEVEL=INFO
     volumes:
       - temp_storage:/tmp/video_processing
+      - ./temp_video_processing:/tmp/video_processing_host  # Volumen en host para videos grandes
     networks:
       - reelify-network
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8001/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 60s  # Aumentado para videos largos
+      timeout: 30s   # Más tiempo para responder
+      retries: 5     # Más reintentos
+      start_period: 40s  # Tiempo inicial antes de verificar
     restart: unless-stopped
 
   # Kick API Microservice

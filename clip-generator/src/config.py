@@ -59,6 +59,11 @@ class Settings:
     service_host: str = os.getenv("SERVICE_HOST", "0.0.0.0")
     service_port: int = int(os.getenv("SERVICE_PORT", "8001"))
     
+    # Configuración de descarga (SIN timeout para videos largos)
+    download_chunk_size: int = int(os.getenv("DOWNLOAD_CHUNK_SIZE", "524288"))  # 512KB chunks (más estable)
+    max_video_size_mb: int = int(os.getenv("MAX_VIDEO_SIZE_MB", "5120"))  # 5GB máximo
+    progress_log_interval: int = int(os.getenv("PROGRESS_LOG_INTERVAL", "50"))  # Log cada 50MB
+    
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
