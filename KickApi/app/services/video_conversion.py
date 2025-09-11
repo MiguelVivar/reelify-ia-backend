@@ -420,7 +420,6 @@ class VideoConversionService:
             return False
     
     @staticmethod
-    @staticmethod
     async def convert_m3u8_to_mp4(m3u8_url: str, output_path: str) -> bool:
         """Convertir stream M3U8 a MP4"""
         try:
@@ -496,6 +495,169 @@ class VideoConversionService:
         except Exception as e:
             print(f"❌ Excepción durante la conversión M3U8 a MP4: {str(e)}")
             return False
+
+    @staticmethod
+    async def convert_m3u8_to_mp4_360p(m3u8_url: str, output_path: str) -> bool:
+        """Convertir stream M3U8 a MP4 en calidad 360p con progreso en consola"""
+        try:
+            print(f"🎬 Iniciando conversión M3U8 a MP4 en calidad 360p...")
+            
+            # Limpiar la URL de caracteres especiales más agresivamente
+            cleaned_url = m3u8_url.strip()
+            # Remover caracteres invisibles comunes
+            for char in ['\u2060', '\u200B', '\u200C', '\u200D', '\uFEFF']:
+                cleaned_url = cleaned_url.replace(char, '')
+            cleaned_url = cleaned_url.strip()
+            
+            print(f"📥 URL original: {repr(m3u8_url)}")
+            print(f"📥 URL limpia: {cleaned_url}")
+            print(f"📤 Archivo de salida: {output_path}")
+            print(f"🎯 Calidad objetivo: 360p (640x360)")
+            
+            # Verificar que la URL sea válida
+            if not cleaned_url.startswith(('http://', 'https://')):
+                print(f"❌ URL inválida: {cleaned_url}")
+                return False
+            
+            # Probar la URL antes de intentar la conversión
+            url_accessible = await VideoConversionService._test_m3u8_url(cleaned_url)
+            if not url_accessible:
+                print("❌ La URL M3U8 no es accesible")
+                return False
+            
+            # Comando FFmpeg para 360p con progreso mejorado
+            cmd = [
+                'ffmpeg', '-i', cleaned_url,
+                '-vf', 'scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2',
+                '-c:v', 'libx264', '-preset', 'medium', '-crf', '28',
+                '-c:a', 'aac', '-b:a', '96k',
+                '-f', 'mp4', output_path, '-y'
+            ]
+            
+            print(f"🔧 Ejecutando comando FFmpeg para 360p: {' '.join(cmd[:8])}...")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd, 
+                stdout=asyncio.subprocess.PIPE, 
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            print("⏳ Iniciando conversión con monitoreo de progreso...")
+            
+            # Variables para monitoreo
+            last_progress = -1
+            duration = None
+            last_size_check = 0
+            
+            async def monitor_progress_and_size():
+                nonlocal last_progress, duration, last_size_check
+                while True:
+                    try:
+                        line = await asyncio.wait_for(process.stderr.readline(), timeout=1.0)
+                        if not line:
+                            break
+                        
+                        line = line.decode('utf-8', errors='ignore').strip()
+                        
+                        # Obtener duración del video
+                        if 'Duration:' in line and duration is None:
+                            try:
+                                duration_str = line.split('Duration: ')[1].split(',')[0]
+                                h, m, s = duration_str.split(':')
+                                duration = int(h) * 3600 + int(m) * 60 + float(s)
+                                print(f"⏱️ Duración del video: {duration_str} ({duration:.0f}s)")
+                            except Exception:
+                                pass
+                        
+                        # Monitorear progreso usando el tiempo actual
+                        if 'time=' in line and duration:
+                            try:
+                                # Buscar el tiempo actual en el formato time=00:01:23.45
+                                time_part = [part for part in line.split() if part.startswith('time=')]
+                                if time_part:
+                                    time_str = time_part[0].split('=')[1]
+                                    if ':' in time_str:
+                                        h, m, s = time_str.split(':')
+                                        current_time = int(h) * 3600 + int(m) * 60 + float(s)
+                                        progress = min((current_time / duration) * 100, 100)
+                                        
+                                        # Mostrar progreso cada 5% y verificar tamaño del archivo
+                                        if int(progress) > last_progress and int(progress) % 5 == 0:
+                                            last_progress = int(progress)
+                                            
+                                            # Obtener tamaño actual del archivo
+                                            current_size = 0
+                                            if os.path.exists(output_path):
+                                                current_size = os.path.getsize(output_path)
+                                                size_mb = current_size / (1024 * 1024)
+                                            else:
+                                                size_mb = 0
+                                            
+                                            # Obtener información adicional de la línea
+                                            fps = "N/A"
+                                            bitrate = "N/A"
+                                            for part in line.split():
+                                                if part.startswith('fps='):
+                                                    fps = part.split('=')[1]
+                                                elif part.startswith('bitrate='):
+                                                    bitrate = part.split('=')[1]
+                                            
+                                            print(f"📊 Progreso: {progress:.1f}% | ⏱️ {current_time:.0f}s/{duration:.0f}s | 📁 {size_mb:.2f} MB | 🎞️ {fps} fps | 💾 {bitrate}")
+                            except Exception:
+                                pass
+                        
+                        # Verificar tamaño del archivo cada 10 segundos
+                        import time
+                        current_timestamp = time.time()
+                        if current_timestamp - last_size_check > 10:
+                            last_size_check = current_timestamp
+                            if os.path.exists(output_path):
+                                current_size = os.path.getsize(output_path)
+                                size_mb = current_size / (1024 * 1024)
+                                if size_mb > 0:
+                                    print(f"📦 Tamaño actual del archivo: {size_mb:.2f} MB")
+                    
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        break
+            
+            # Ejecutar monitoreo
+            await asyncio.gather(
+                monitor_progress_and_size(),
+                return_exceptions=True
+            )
+            
+            # Esperar que termine el proceso
+            try:
+                await asyncio.wait_for(process.wait(), timeout=300)  # 5 minutos timeout
+            except asyncio.TimeoutError:
+                print("⏰ Timeout: El proceso de conversión tardó más de 5 minutos")
+                process.kill()
+                await process.wait()
+                return False
+            
+            success = process.returncode == 0
+            
+            if success:
+                print(f"✅ Conversión M3U8 a MP4 360p completada exitosamente (100%)")
+                if os.path.exists(output_path):
+                    file_size = os.path.getsize(output_path)
+                    print(f"📁 Tamaño del archivo 360p generado: {file_size / (1024*1024):.2f} MB")
+                    if file_size == 0:
+                        print("❌ El archivo generado está vacío")
+                        return False
+                else:
+                    print("❌ El archivo de salida no existe")
+                    return False
+            else:
+                print(f"❌ Error en la conversión M3U8 a MP4 360p. Código de retorno: {process.returncode}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ Excepción durante la conversión M3U8 a MP4 360p: {str(e)}")
+            return False
     
     @staticmethod
     def _convert_with_subtitles_simple(input_path: str, output_path: str, subtitle_file: str, quality: str = "medium") -> bool:
@@ -563,7 +725,6 @@ class VideoConversionService:
             return VideoConversionService._convert_simple_fallback(input_path, output_path, quality)
 
     @staticmethod
-    @staticmethod
     async def convert_m3u8_to_mp3(m3u8_url: str, output_path: str) -> bool:
         """Convertir stream M3U8 a MP3"""
         try:
@@ -615,6 +776,164 @@ class VideoConversionService:
                 if stderr:
                     error_msg = stderr.decode('utf-8', errors='ignore')[:1000]  # Limitar longitud del error
                     print(f"🔍 Error detallado: {error_msg}")
+            
+            return success
+            
+        except Exception as e:
+            print(f"❌ Excepción durante la conversión M3U8 a MP3: {str(e)}")
+            return False
+
+    @staticmethod
+    async def convert_m3u8_to_mp3_optimized(m3u8_url: str, output_path: str) -> bool:
+        """Convertir stream M3U8 a MP3 optimizado con progreso en consola"""
+        try:
+            print(f"🎵 Iniciando conversión M3U8 a MP3 optimizado...")
+            
+            # Limpiar la URL de caracteres especiales
+            cleaned_url = m3u8_url.strip()
+            # Remover caracteres invisibles comunes
+            for char in ['\u2060', '\u200B', '\u200C', '\u200D', '\uFEFF']:
+                cleaned_url = cleaned_url.replace(char, '')
+            cleaned_url = cleaned_url.strip()
+            
+            print(f"📥 URL original: {repr(m3u8_url)}")
+            print(f"📥 URL limpia: {cleaned_url}")
+            print(f"📤 Archivo de salida: {output_path}")
+            print(f"🎯 Calidad objetivo: 192kbps MP3")
+            
+            # Verificar que la URL sea válida
+            if not cleaned_url.startswith(('http://', 'https://')):
+                print(f"❌ URL inválida: {cleaned_url}")
+                return False
+            
+            # Probar la URL antes de intentar la conversión
+            url_accessible = await VideoConversionService._test_m3u8_url(cleaned_url)
+            if not url_accessible:
+                print("❌ La URL M3U8 no es accesible")
+                return False
+            
+            # Comando FFmpeg para MP3 con progreso mejorado
+            cmd = [
+                'ffmpeg', '-i', cleaned_url,
+                '-vn', '-acodec', 'mp3', '-ab', '192k',
+                output_path, '-y'
+            ]
+            
+            print(f"🔧 Ejecutando comando FFmpeg para MP3: {' '.join(cmd[:6])}...")
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd, 
+                stdout=asyncio.subprocess.PIPE, 
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            print("⏳ Iniciando conversión de audio con monitoreo de progreso...")
+            
+            # Variables para monitoreo
+            last_progress = -1
+            duration = None
+            last_size_check = 0
+            
+            async def monitor_progress_and_size():
+                nonlocal last_progress, duration, last_size_check
+                while True:
+                    try:
+                        line = await asyncio.wait_for(process.stderr.readline(), timeout=1.0)
+                        if not line:
+                            break
+                        
+                        line = line.decode('utf-8', errors='ignore').strip()
+                        
+                        # Obtener duración del audio
+                        if 'Duration:' in line and duration is None:
+                            try:
+                                duration_str = line.split('Duration: ')[1].split(',')[0]
+                                h, m, s = duration_str.split(':')
+                                duration = int(h) * 3600 + int(m) * 60 + float(s)
+                                print(f"⏱️ Duración del audio: {duration_str} ({duration:.0f}s)")
+                            except Exception:
+                                pass
+                        
+                        # Monitorear progreso usando el tiempo actual
+                        if 'time=' in line and duration:
+                            try:
+                                # Buscar el tiempo actual en el formato time=00:01:23.45
+                                time_part = [part for part in line.split() if part.startswith('time=')]
+                                if time_part:
+                                    time_str = time_part[0].split('=')[1]
+                                    if ':' in time_str:
+                                        h, m, s = time_str.split(':')
+                                        current_time = int(h) * 3600 + int(m) * 60 + float(s)
+                                        progress = min((current_time / duration) * 100, 100)
+                                        
+                                        # Mostrar progreso cada 5%
+                                        if int(progress) > last_progress and int(progress) % 5 == 0:
+                                            last_progress = int(progress)
+                                            
+                                            # Obtener tamaño actual del archivo
+                                            current_size = 0
+                                            if os.path.exists(output_path):
+                                                current_size = os.path.getsize(output_path)
+                                                size_mb = current_size / (1024 * 1024)
+                                            else:
+                                                size_mb = 0
+                                            
+                                            # Obtener información adicional de la línea
+                                            bitrate = "N/A"
+                                            for part in line.split():
+                                                if part.startswith('bitrate='):
+                                                    bitrate = part.split('=')[1]
+                                            
+                                            print(f"🎵 Progreso: {progress:.1f}% | ⏱️ {current_time:.0f}s/{duration:.0f}s | 📁 {size_mb:.2f} MB | 💾 {bitrate}")
+                            except Exception:
+                                pass
+                        
+                        # Verificar tamaño del archivo cada 10 segundos
+                        import time
+                        current_timestamp = time.time()
+                        if current_timestamp - last_size_check > 10:
+                            last_size_check = current_timestamp
+                            if os.path.exists(output_path):
+                                current_size = os.path.getsize(output_path)
+                                size_mb = current_size / (1024 * 1024)
+                                if size_mb > 0:
+                                    print(f"📦 Tamaño actual del archivo MP3: {size_mb:.2f} MB")
+                    
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception:
+                        break
+            
+            # Ejecutar monitoreo
+            await asyncio.gather(
+                monitor_progress_and_size(),
+                return_exceptions=True
+            )
+            
+            # Esperar que termine el proceso
+            try:
+                await asyncio.wait_for(process.wait(), timeout=300)  # 5 minutos timeout
+            except asyncio.TimeoutError:
+                print("⏰ Timeout: El proceso de conversión MP3 tardó más de 5 minutos")
+                process.kill()
+                await process.wait()
+                return False
+            
+            success = process.returncode == 0
+            
+            if success:
+                print(f"✅ Conversión M3U8 a MP3 completada exitosamente (100%)")
+                if os.path.exists(output_path):
+                    file_size = os.path.getsize(output_path)
+                    print(f"📁 Tamaño del archivo MP3 generado: {file_size / (1024*1024):.2f} MB")
+                    if file_size == 0:
+                        print("❌ El archivo generado está vacío")
+                        return False
+                else:
+                    print("❌ El archivo de salida no existe")
+                    return False
+            else:
+                print(f"❌ Error en la conversión M3U8 a MP3. Código de retorno: {process.returncode}")
             
             return success
             

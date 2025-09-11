@@ -34,13 +34,15 @@ class Settings:
     highlight_threshold: float = float(os.getenv("HIGHLIGHT_THRESHOLD", "0.8"))  # Threshold más alto para máxima selectividad
     
     # Configuración avanzada para análisis viral
-    viral_score_threshold: float = float(os.getenv("VIRAL_SCORE_THRESHOLD", "0.75"))  # Score mínimo para consideración viral
-    max_clips_per_video: int = int(os.getenv("MAX_CLIPS_PER_VIDEO", "3"))  # Máximo clips por video para selectividad
-    min_clip_separation_seconds: int = int(os.getenv("MIN_CLIP_SEPARATION_SECONDS", "120"))  # Separación mínima entre clips
+    viral_score_threshold: float = float(os.getenv("VIRAL_SCORE_THRESHOLD", "0.65"))  # Score mínimo para consideración viral (reducido para más flexibilidad)
+    max_clips_per_video: int = int(os.getenv("MAX_CLIPS_PER_VIDEO", "15"))  # Máximo clips por video (aumentado significativamente)
+    min_clip_separation_seconds: int = int(os.getenv("MIN_CLIP_SEPARATION_SECONDS", "60"))  # Separación mínima entre clips (reducida)
     
-    # Duración óptima para contenido viral (rangos)
-    optimal_viral_duration_min: int = int(os.getenv("OPTIMAL_VIRAL_DURATION_MIN", "25"))
-    optimal_viral_duration_max: int = int(os.getenv("OPTIMAL_VIRAL_DURATION_MAX", "45"))
+    # Duración dinámica para contenido viral (rangos flexibles)
+    absolute_min_clip_duration: int = int(os.getenv("ABSOLUTE_MIN_CLIP_DURATION", "15"))  # Mínimo absoluto
+    absolute_max_clip_duration: int = int(os.getenv("ABSOLUTE_MAX_CLIP_DURATION", "180"))  # Máximo absoluto (3 minutos)
+    optimal_viral_duration_min: int = int(os.getenv("OPTIMAL_VIRAL_DURATION_MIN", "20"))
+    optimal_viral_duration_max: int = int(os.getenv("OPTIMAL_VIRAL_DURATION_MAX", "90"))  # Aumentado para más flexibilidad
     
     # Configuración de engagement y retención
     hook_analysis_duration: int = int(os.getenv("HOOK_ANALYSIS_DURATION", "5"))  # Primeros N segundos para analizar hook

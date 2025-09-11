@@ -119,10 +119,12 @@ class DeepseekVideoAnalyzer:
         # Inicializar detector de contenido viral
         self.viral_detector = ViralContentDetector()
         
-        # Configuración de calidad temporal
-        self.min_clip_separation = 120.0  # 2 minutos entre clips para máxima distribución
-        self.optimal_clip_duration = (25, 75)  # Duración óptima para viral (25-75 segundos)
-        self.max_clips_per_hour = 2  # Máximo 2 clips por hora de video
+        # Configuración de calidad temporal dinámica
+        self.min_clip_separation = settings.min_clip_separation_seconds  # Usar configuración
+        self.optimal_clip_duration = (settings.optimal_viral_duration_min, settings.optimal_viral_duration_max)  # Rango óptimo dinámico
+        self.max_clips_per_video = settings.max_clips_per_video  # Máximo dinámico
+        self.absolute_min_duration = settings.absolute_min_clip_duration  # Mínimo absoluto
+        self.absolute_max_duration = settings.absolute_max_clip_duration  # Máximo absoluto
         
         # Inicializar Whisper para transcripciones
         try:
@@ -497,12 +499,12 @@ class DeepseekVideoAnalyzer:
             
             logger.info(f"Enviando {len(segment_transcriptions)} transcripciones a Deepseek para análisis")
             
-            prompt = f"""Eres un experto en identificar contenido VIRAL en redes sociales. Analiza estas transcripciones y selecciona SOLO los momentos con mayor potencial viral.
+            prompt = f"""Eres un experto en identificar contenido VIRAL en redes sociales. Analiza estas transcripciones y selecciona TODOS los momentos con potencial viral real.
 
 TRANSCRIPCIONES:
 {transcription_text}
 
-CRITERIOS VIRALES ESTRICTOS (Score mínimo 0.8):
+CRITERIOS VIRALES FLEXIBLES (Score mínimo 0.65):
 🔥 EMOCIONES INTENSAS: Reacciones auténticas, sorpresas, risas explosivas
 💬 FRASES MEMORABLES: Citas pegajosas, declaraciones polémicas apropiadas
 ⚡ MOMENTOS CLIMÁTICOS: Puntos de tensión, revelaciones, plot twists
@@ -512,25 +514,36 @@ CRITERIOS VIRALES ESTRICTOS (Score mínimo 0.8):
 
 EVITAR ABSOLUTAMENTE:
 ❌ Explicaciones largas sin gancho emocional
-❌ Momentos de transición o relleno
+❌ Momentos de transición o relleno sin valor
 ❌ Contenido técnico sin emoción
 ❌ Repeticiones o información redundante
 ❌ Momentos monótonos o de baja energía
 
-REGLAS TEMPORALES CRÍTICAS:
-- Clips de 20-60 segundos (óptimo: 25-45 segundos)
-- MÍNIMO 2 MINUTOS de separación entre clips
-- Máximo 3 clips por video (selectividad extrema)
-- Priorizar CALIDAD absoluta sobre cantidad
-- Distribuir clips a lo largo del video completo
+REGLAS TEMPORALES DINÁMICAS:
+- Duración COMPLETAMENTE FLEXIBLE: 15 segundos - 3 minutos según el contenido
+- Clips cortos (15-30s): Para momentos de máximo impacto, reacciones explosivas
+- Clips medianos (30-90s): Para historias completas, explicaciones valiosas
+- Clips largos (90-180s): Para contenido educativo profundo, debates completos
+- MÍNIMO 1 MINUTO de separación entre clips
+- SIN LÍMITE FIJO de clips - encuentra TODOS los momentos virales
+- La duración debe ajustarse PERFECTAMENTE al contenido
+- Priorizar CALIDAD y COMPLETITUD sobre restricciones arbitrarias
+
+DISTRIBUCIÓN INTELIGENTE:
+- Analiza TODO el video completo
+- Identifica CADA momento con potencial viral
+- No te limites a un número específico de clips
+- Distribuye clips a lo largo del video según el contenido
+- Si hay 10 momentos virales, devuelve 10 clips
+- Si hay 2 momentos virales, devuelve 2 clips
 
 INSTRUCCIONES ESPECÍFICAS:
 1. Lee TODA la transcripción antes de decidir
-2. Identifica solo momentos que harían que alguien pause el scroll
-3. Busca contenido que genere comentarios y shares
-4. Evita clips similares o redundantes
+2. Identifica TODOS los momentos que harían que alguien pause el scroll
+3. Ajusta la duración EXACTA necesaria para cada momento
+4. Incluye contexto suficiente para entender completamente el momento
 5. Los tiempos deben ser EXACTOS del video completo
-6. Incluye contexto suficiente para entender el momento
+6. No te autolimites - encuentra todos los clips valiosos
 
 FORMATO DE RESPUESTA (JSON ESTRICTO):
 {{
@@ -541,13 +554,15 @@ FORMATO DE RESPUESTA (JSON ESTRICTO):
             "reason": "Reacción explosiva inesperada que genera engagement inmediato",
             "start_time": 125.5,
             "end_time": 165.2,
+            "optimal_duration": 39.7,
             "viral_category": "emotional_reaction",
-            "engagement_prediction": "high_share_potential"
+            "engagement_prediction": "high_share_potential",
+            "duration_rationale": "Duración ajustada para capturar toda la reacción y contexto"
         }}
     ]
 }}
 
-NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor CERO clips que clips mediocres."""
+NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos virales, devuelve 8 clips. Si encuentras 15, devuelve 15. La duración debe ser la ÓPTIMA para cada momento específico."""
             
             # Hacer llamada a OpenRouter
             headers = {
@@ -721,21 +736,35 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
         # Ordenar candidatos por tiempo de inicio
         candidates.sort(key=lambda x: x.start)
         
-        # Filtrar candidatos por score mínimo estricto
-        min_viral_score = 0.6  # Score mínimo para consideración
+        # Filtrar candidatos por score mínimo más flexible
+        min_viral_score = settings.viral_score_threshold  # Usar configuración dinámica
         viral_candidates = [c for c in candidates if c.final_score >= min_viral_score]
         
         logger.info(f"Candidatos virales (score >= {min_viral_score}): {len(viral_candidates)} de {len(candidates)}")
         
         if not viral_candidates:
-            # Si no hay candidatos virales, tomar los mejores 2
-            candidates.sort(key=lambda x: x.final_score, reverse=True)
-            return candidates[:2]
+            # Si no hay candidatos virales, relajar el criterio gradualmente
+            relaxed_thresholds = [0.5, 0.4, 0.3]
+            for threshold in relaxed_thresholds:
+                viral_candidates = [c for c in candidates if c.final_score >= threshold]
+                if viral_candidates:
+                    logger.info(f"Usando threshold relajado de {threshold}: {len(viral_candidates)} candidatos encontrados")
+                    break
+            
+            if not viral_candidates:
+                # Si aún no hay candidatos, tomar los mejores disponibles
+                candidates.sort(key=lambda x: x.final_score, reverse=True)
+                max_fallback_clips = min(3, len(candidates))
+                logger.info(f"Sin candidatos virales, tomando los {max_fallback_clips} mejores clips disponibles")
+                return candidates[:max_fallback_clips]
         
-        # Aplicar algoritmo de selección con restricciones temporales
+        # Aplicar algoritmo de selección con restricciones temporales dinámicas
         n = len(viral_candidates)
         if n == 1:
             return viral_candidates
+        
+        # Usar límite dinámico de clips basado en configuración
+        max_clips_allowed = min(self.max_clips_per_video, n)
         
         # Crear matriz de compatibilidad temporal
         compatible = [[False] * n for _ in range(n)]
@@ -748,33 +777,30 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
                     compatible[i][j] = compatible[j][i] = True
         
         # Programación dinámica para encontrar la mejor combinación
-        selected_clips = self._dp_optimal_selection(viral_candidates, compatible)
+        selected_clips = self._dp_optimal_selection(viral_candidates, compatible, max_clips_allowed)
         
-        # Validación final y limitación
-        if len(selected_clips) > 3:
-            # Si tenemos más de 3, tomar los 3 mejores
-            selected_clips.sort(key=lambda x: x.final_score, reverse=True)
-            selected_clips = selected_clips[:3]
+        # Sin limitación artificial estricta - usar todos los clips válidos de calidad
+        logger.info(f"Clips seleccionados por algoritmo DP: {len(selected_clips)} de {n} candidatos")
         
         # Ordenar por tiempo para resultado final
         selected_clips.sort(key=lambda x: x.start)
         
         return selected_clips
 
-    def _dp_optimal_selection(self, candidates: List[ClipCandidate], compatible: List[List[bool]]) -> List[ClipCandidate]:
-        """Algoritmo de programación dinámica para selección óptima"""
+    def _dp_optimal_selection(self, candidates: List[ClipCandidate], compatible: List[List[bool]], max_clips: int) -> List[ClipCandidate]:
+        """Algoritmo de programación dinámica para selección óptima con límite dinámico"""
         n = len(candidates)
         if n == 0:
             return []
         
-        # DP con máximo 3 clips
-        max_clips = min(3, n)
+        # Usar límite dinámico pero con flexibilidad
+        max_clips_dynamic = min(max_clips, n)
         
         # dp[i][k] = (score_máximo, clips_seleccionados) usando hasta el clip i con k clips
-        dp = [[(0.0, [])] * (max_clips + 1) for _ in range(n)]
+        dp = [[(0.0, [])] * (max_clips_dynamic + 1) for _ in range(n)]
         
         # Inicialización
-        for k in range(max_clips + 1):
+        for k in range(max_clips_dynamic + 1):
             if k == 1:
                 dp[0][k] = (candidates[0].final_score, [candidates[0]])
             else:
@@ -784,7 +810,7 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
         for i in range(1, n):
             current_candidate = candidates[i]
             
-            for k in range(max_clips + 1):
+            for k in range(max_clips_dynamic + 1):
                 # Opción 1: No tomar el clip actual
                 dp[i][k] = dp[i-1][k]
                 
@@ -814,16 +840,17 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
         best_clips = []
         
         for i in range(n):
-            for k in range(1, max_clips + 1):
+            for k in range(1, max_clips_dynamic + 1):
                 if dp[i][k][0] > best_score:
                     best_score = dp[i][k][0]
                     best_clips = dp[i][k][1]
         
+        logger.info(f"Algoritmo DP seleccionó {len(best_clips)} clips con score total: {best_score:.3f}")
         return best_clips
     
     def _validate_viral_potential(self, clips: List[Dict]) -> List[Dict]:
         """
-        Validación adicional para asegurar que los clips tengan potencial viral.
+        Validación flexible para asegurar que los clips tengan potencial viral.
         """
         if not clips:
             return clips
@@ -834,23 +861,28 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             reason = clip.get("reason", "")
             duration = clip["end"] - clip["start"]
             
-            # Criterios adicionales de validación
+            # Criterios de validación más flexibles
             is_viral_worthy = (
-                score >= 0.75 and  # Score mínimo alto
-                15 <= duration <= 90 and  # Duración apropiada para viral
-                len(reason) > 10  # Razón descriptiva
+                score >= settings.viral_score_threshold and  # Score mínimo configurable
+                self.absolute_min_duration <= duration <= self.absolute_max_duration and  # Duración flexible
+                len(reason) > 5  # Razón descriptiva mínima
             )
             
             if is_viral_worthy:
                 viral_clips.append(clip)
-                logger.info(f"Clip validado como viral: {clip['start']:.1f}s-{clip['end']:.1f}s (score: {score:.2f})")
+                logger.info(f"Clip validado como viral: {clip['start']:.1f}s-{clip['end']:.1f}s "
+                           f"(duración: {duration:.1f}s, score: {score:.2f})")
             else:
-                logger.info(f"Clip descartado en validación viral: {clip['start']:.1f}s-{clip['end']:.1f}s (score: {score:.2f})")
+                logger.info(f"Clip descartado en validación: {clip['start']:.1f}s-{clip['end']:.1f}s "
+                           f"(duración: {duration:.1f}s, score: {score:.2f}) - "
+                           f"Razones: score < {settings.viral_score_threshold}, "
+                           f"duración fuera de rango [{self.absolute_min_duration}-{self.absolute_max_duration}]")
         
+        logger.info(f"Validación completada: {len(viral_clips)} clips virales de {len(clips)} candidatos")
         return viral_clips
     
     def _convert_to_clips_with_metadata(self, highlights: List[Dict], video_duration: float) -> List[Dict[str, Any]]:
-        """Convierte highlights a clips válidos con metadatos completos"""
+        """Convierte highlights a clips válidos con metadatos completos y duración dinámica"""
         clips = []
         
         for highlight in highlights:
@@ -864,34 +896,62 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             if duration <= 0:
                 continue
             
-            # Ajustar duración si es necesario
-            if duration < settings.min_clip_duration:
-                # Extender el clip para alcanzar la duración mínima
-                extension = (settings.min_clip_duration - duration) / 2
-                start = max(0, start - extension)
-                end = min(video_duration, end + extension)
+            # Usar duración dinámica basada en el análisis de Deepseek
+            optimal_duration = highlight.get("optimal_duration")
+            if optimal_duration:
+                # Si Deepseek especifica una duración óptima, usarla
+                target_duration = float(optimal_duration)
+                logger.info(f"Usando duración óptima de Deepseek: {target_duration:.1f}s")
+                
+                # Ajustar tiempos manteniendo el centro del momento
+                center_time = (start + end) / 2
+                new_start = max(0, center_time - target_duration / 2)
+                new_end = min(video_duration, center_time + target_duration / 2)
+                
+                # Verificar que no exceda los límites del video
+                if new_end - new_start < target_duration:
+                    # Ajustar hacia atrás si es necesario
+                    if new_end == video_duration:
+                        new_start = max(0, video_duration - target_duration)
+                    else:
+                        new_end = min(video_duration, new_start + target_duration)
+                
+                start = new_start
+                end = new_end
                 duration = end - start
-            
-            if duration > settings.max_clip_duration:
-                # Acortar el clip a la duración máxima
-                end = start + settings.max_clip_duration
-                duration = settings.max_clip_duration
+            else:
+                # Validar duración contra límites absolutos
+                if duration < self.absolute_min_duration:
+                    # Extender el clip para alcanzar la duración mínima absoluta
+                    extension = (self.absolute_min_duration - duration) / 2
+                    start = max(0, start - extension)
+                    end = min(video_duration, end + extension)
+                    duration = end - start
+                    logger.info(f"Clip extendido a duración mínima: {duration:.1f}s")
+                
+                if duration > self.absolute_max_duration:
+                    # Acortar el clip a la duración máxima absoluta
+                    end = start + self.absolute_max_duration
+                    duration = self.absolute_max_duration
+                    logger.info(f"Clip acortado a duración máxima: {duration:.1f}s")
             
             clip_data = {
                 "start": start,
                 "end": end,
                 "score": score,
-                "reason": reason
+                "reason": reason,
+                "duration": duration,
+                "duration_rationale": highlight.get("duration_rationale", "Duración ajustada automáticamente")
             }
             clips.append(clip_data)
             
-            logger.info(f"Clip con metadatos: {start:.2f}s - {end:.2f}s "
-                       f"(score: {score:.2f}, reason: {reason[:50]}...)")
+            logger.info(f"Clip con metadatos dinámicos: {start:.2f}s - {end:.2f}s "
+                       f"(duración: {duration:.1f}s, score: {score:.2f})")
         
         return clips
 
     def _convert_to_clips(self, highlights: List[Dict]) -> List[Tuple[float, float]]:
-        """Convierte highlights a clips válidos con duraciones apropiadas"""
+        """Convierte highlights a clips válidos con duraciones apropiadas y dinámicas"""
         clips = []
         
         for highlight in highlights:
@@ -903,18 +963,29 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             if duration <= 0:
                 continue
             
-            # Ajustar duración si es necesario
-            if duration < settings.min_clip_duration:
-                # Extender el clip para alcanzar la duración mínima
-                extension = (settings.min_clip_duration - duration) / 2
-                start = max(0, start - extension)
-                end = end + extension
+            # Usar duración dinámica basada en análisis de Deepseek
+            optimal_duration = highlight.get("optimal_duration")
+            if optimal_duration:
+                # Si Deepseek especifica una duración óptima, respetarla
+                target_duration = float(optimal_duration)
+                center_time = (start + end) / 2
+                start = max(0, center_time - target_duration / 2)
+                end = center_time + target_duration / 2
                 duration = end - start
-            
-            if duration > settings.max_clip_duration:
-                # Acortar el clip a la duración máxima
-                end = start + settings.max_clip_duration
-                duration = settings.max_clip_duration
+                logger.info(f"Aplicando duración óptima de Deepseek: {target_duration:.1f}s")
+            else:
+                # Ajustar duración si es necesario con límites absolutos
+                if duration < self.absolute_min_duration:
+                    # Extender el clip para alcanzar la duración mínima
+                    extension = (self.absolute_min_duration - duration) / 2
+                    start = max(0, start - extension)
+                    end = end + extension
+                    duration = end - start
+                
+                if duration > self.absolute_max_duration:
+                    # Acortar el clip a la duración máxima
+                    end = start + self.absolute_max_duration
+                    duration = self.absolute_max_duration
             
             clips.append({
                 "start": start,
@@ -923,9 +994,8 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
                 "reason": highlight.get("reason", "Momento destacado identificado por IA")
             })
             
-            logger.info(f"Clip identificado: {start:.2f}s - {end:.2f}s "
-                       f"(score: {highlight.get('score', 0):.2f}, "
-                       f"reason: {highlight.get('reason', 'N/A')[:50]}...)")
+            logger.info(f"Clip identificado dinámico: {start:.2f}s - {end:.2f}s "
+                       f"(duración: {duration:.1f}s, score: {highlight.get('score', 0):.2f})")
         
         # Aplicar filtro de solapamiento
         filtered_highlights = self._filter_overlapping_clips(clips)
@@ -942,23 +1012,27 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             return []
         
         segments = []
-        max_clip_duration = settings.max_clip_duration
-        min_clip_duration = settings.min_clip_duration
         
-        if duration < min_clip_duration:
+        if duration < self.absolute_min_duration:
             return []
         
-        if duration <= max_clip_duration:
+        if duration <= self.absolute_max_duration:
             return [{
                 "start": 0.0,
                 "end": duration,
                 "score": 0.6,
-                "reason": "Video completo - duración adecuada"
+                "reason": "Video completo - duración adecuada",
+                "duration": duration
             }]
         
-        # Crear clips estratégicamente distribuidos (no consecutivos)
-        total_clips = min(5, max(2, int(duration / 180)))  # 1 clip cada 3 minutos aproximadamente
-        segment_duration = min(max_clip_duration, 60)  # Clips de hasta 60 segundos
+        # Crear clips estratégicamente distribuidos con duración dinámica
+        # Calcular número óptimo de clips basado en la duración del video
+        clips_per_hour = 4  # 4 clips por hora como base
+        total_clips = min(self.max_clips_per_video, max(2, int(duration / 3600 * clips_per_hour)))
+        
+        # Duración variable para clips de respaldo
+        min_segment_duration = self.optimal_clip_duration[0]  # 20s
+        max_segment_duration = self.optimal_clip_duration[1]  # 90s
         
         # Distribuir clips a lo largo del video
         for i in range(total_clips):
@@ -966,19 +1040,29 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             segment_position = (i + 0.5) / total_clips  # Evitar inicio y final del video
             start_time = segment_position * duration
             
+            # Duración variable basada en la posición (clips del medio pueden ser más largos)
+            if i == 0 or i == total_clips - 1:
+                # Primer y último clip más cortos
+                segment_duration = min_segment_duration
+            else:
+                # Clips del medio pueden ser más largos
+                segment_duration = min_segment_duration + (max_segment_duration - min_segment_duration) * 0.7
+            
             # Ajustar para no exceder la duración del video
             end_time = min(start_time + segment_duration, duration)
             start_time = max(0, end_time - segment_duration)
             
-            if end_time - start_time >= min_clip_duration:
+            if end_time - start_time >= self.absolute_min_duration:
+                actual_duration = end_time - start_time
                 segments.append({
                     "start": start_time,
                     "end": end_time,
-                    "score": 0.5 + (i * 0.1),  # Score ligeramente variable
-                    "reason": f"Segmento estratégico {i + 1} - selección automática distribuida"
+                    "score": 0.5 + (i * 0.05),  # Score ligeramente variable
+                    "reason": f"Segmento estratégico {i + 1} - selección automática distribuida (duración: {actual_duration:.1f}s)",
+                    "duration": actual_duration
                 })
                 
-                logger.info(f"Segmento de respaldo {i+1}: {start_time:.1f}s - {end_time:.1f}s")
+                logger.info(f"Segmento de respaldo {i+1}: {start_time:.1f}s - {end_time:.1f}s (duración: {actual_duration:.1f}s)")
         
         return segments
 
@@ -991,18 +1075,20 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             return []
         
         segments = []
-        max_clip_duration = settings.max_clip_duration
-        min_clip_duration = settings.min_clip_duration
         
-        if duration < min_clip_duration:
+        if duration < self.absolute_min_duration:
             return []
         
-        if duration <= max_clip_duration:
+        if duration <= self.absolute_max_duration:
             return [(0.0, duration)]
         
-        # Crear clips estratégicamente distribuidos (no consecutivos)
-        total_clips = min(5, max(2, int(duration / 180)))  # 1 clip cada 3 minutos aproximadamente
-        segment_duration = min(max_clip_duration, 60)  # Clips de hasta 60 segundos
+        # Crear clips estratégicamente distribuidos con duración dinámica
+        clips_per_hour = 4  # Base para cálculo
+        total_clips = min(self.max_clips_per_video, max(2, int(duration / 3600 * clips_per_hour)))
+        
+        # Duración variable para clips de respaldo
+        min_segment_duration = self.optimal_clip_duration[0]
+        max_segment_duration = self.optimal_clip_duration[1]
         
         # Distribuir clips a lo largo del video
         for i in range(total_clips):
@@ -1010,13 +1096,20 @@ NOTA CRÍTICA: Si no hay momentos con score >= 0.8, devuelve array vacío. Mejor
             segment_position = (i + 0.5) / total_clips  # Evitar inicio y final del video
             start_time = segment_position * duration
             
+            # Duración variable basada en la posición
+            if i == 0 or i == total_clips - 1:
+                segment_duration = min_segment_duration
+            else:
+                segment_duration = min_segment_duration + (max_segment_duration - min_segment_duration) * 0.5
+            
             # Ajustar para no exceder la duración del video
             end_time = min(start_time + segment_duration, duration)
             start_time = max(0, end_time - segment_duration)
             
-            if end_time - start_time >= min_clip_duration:
+            if end_time - start_time >= self.absolute_min_duration:
                 segments.append((start_time, end_time))
-                logger.info(f"Segmento de respaldo {i+1}: {start_time:.1f}s - {end_time:.1f}s")
+                logger.info(f"Segmento de respaldo {i+1}: {start_time:.1f}s - {end_time:.1f}s "
+                           f"(duración: {end_time - start_time:.1f}s)")
         
         return segments
     
