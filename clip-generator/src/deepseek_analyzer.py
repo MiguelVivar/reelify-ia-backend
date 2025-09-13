@@ -429,6 +429,59 @@ class DeepseekVideoAnalyzer:
             current_time += self.segment_duration
         
         return segments
+
+    def _compute_backup_segment_duration(self, position: float, index: int, total: int, min_d: float, max_d: float) -> float:
+        """Calcula una duración inteligente para clips de respaldo.
+
+        - `position`: posición relativa en el video (0..1)
+        - `index`: índice del clip (0..total-1)
+        - `total`: número total de clips
+        - `min_d`, `max_d`: límites absolutos
+
+        La lógica busca:
+        - Clips del principio y final más cortos (gancho / cierre)
+        - Clips centrales más largos (más contexto)
+        - Añadir una pequeña variación (jitter) dependiente del índice para evitar duraciones idénticas
+        - Respetar `absolute_min_duration` y `absolute_max_duration`
+        """
+        # Peso base según distancia al centro (0..1)
+        center_distance = abs(0.5 - position)
+
+        # Más cerca del centro -> más largo. Invertir y normalizar.
+        center_influence = 1.0 - (center_distance * 2.0)  # 1 en centro, 0 en extremos
+        center_influence = max(0.0, min(1.0, center_influence))
+
+        # Base duration interpolada entre min_d y max_d
+        base_duration = min_d + (max_d - min_d) * (0.2 + 0.8 * center_influence)
+
+        # Reducir levemente primer/último clip para gancho/cierre
+        edge_factor = 1.0
+        if index == 0 or index == total - 1:
+            edge_factor = 0.65
+        elif index == 1 or index == total - 2:
+            edge_factor = 0.85
+
+        duration = base_duration * edge_factor
+
+        # Añadir jitter determinístico pequeño basado en índice (para reproducibilidad)
+        jitter = (self._deterministic_jitter(index) - 0.5) * 0.15 * duration
+        duration += jitter
+
+        # Respetar límites absolutos configurados
+        duration = max(duration, self.absolute_min_duration, min_d)
+        duration = min(duration, self.absolute_max_duration, max_d)
+
+        return float(duration)
+
+    def _deterministic_jitter(self, index: int) -> float:
+        """Genera un valor pseudoaleatorio determinístico 0..1 a partir del índice."""
+        # Simple LCG para reproducibilidad
+        a = 1664525
+        c = 1013904223
+        m = 2 ** 32
+        seed = (index + 1) * 9781
+        val = (a * seed + c) % m
+        return (val / m)
     
     async def _transcribe_segment(self, video_path: str, start_time: float, end_time: float) -> Optional[str]:
         """Transcribe un segmento específico del video"""
@@ -1025,42 +1078,42 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
             }]
         
         # Crear clips estratégicamente distribuidos con duración dinámica
-        # Calcular número óptimo de clips basado en la duración del video
-        clips_per_hour = 4  # 4 clips por hora como base
+        clips_per_hour = 4
         total_clips = min(self.max_clips_per_video, max(2, int(duration / 3600 * clips_per_hour)))
-        
-        # Duración variable para clips de respaldo
-        min_segment_duration = self.optimal_clip_duration[0]  # 20s
-        max_segment_duration = self.optimal_clip_duration[1]  # 90s
-        
-        # Distribuir clips a lo largo del video
+
+        min_segment_duration = self.optimal_clip_duration[0]
+        max_segment_duration = self.optimal_clip_duration[1]
+
         for i in range(total_clips):
-            # Calcular posición estratégica en el video
-            segment_position = (i + 0.5) / total_clips  # Evitar inicio y final del video
-            start_time = segment_position * duration
-            
-            # Duración variable basada en la posición (clips del medio pueden ser más largos)
-            if i == 0 or i == total_clips - 1:
-                # Primer y último clip más cortos
-                segment_duration = min_segment_duration
-            else:
-                # Clips del medio pueden ser más largos
-                segment_duration = min_segment_duration + (max_segment_duration - min_segment_duration) * 0.7
-            
-            # Ajustar para no exceder la duración del video
-            end_time = min(start_time + segment_duration, duration)
+            # Posición relativa en el video (0..1)
+            segment_position = (i + 0.5) / total_clips
+
+            # Calcular duración objetivo usando helper inteligente
+            segment_duration = self._compute_backup_segment_duration(
+                position=segment_position,
+                index=i,
+                total=total_clips,
+                min_d=min_segment_duration,
+                max_d=max_segment_duration
+            )
+
+            # Centrar el clip en la posición calculada
+            center = segment_position * duration
+            start_time = max(0, center - segment_duration / 2)
+            end_time = min(duration, start_time + segment_duration)
+            # Ajustar start si el end tocó el final
             start_time = max(0, end_time - segment_duration)
-            
+
             if end_time - start_time >= self.absolute_min_duration:
                 actual_duration = end_time - start_time
                 segments.append({
                     "start": start_time,
                     "end": end_time,
-                    "score": 0.5 + (i * 0.05),  # Score ligeramente variable
+                    "score": 0.5 + (i * 0.05),
                     "reason": f"Segmento estratégico {i + 1} - selección automática distribuida (duración: {actual_duration:.1f}s)",
                     "duration": actual_duration
                 })
-                
+
                 logger.info(f"Segmento de respaldo {i+1}: {start_time:.1f}s - {end_time:.1f}s (duración: {actual_duration:.1f}s)")
         
         return segments
@@ -1081,34 +1134,33 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         if duration <= self.absolute_max_duration:
             return [(0.0, duration)]
         
-        # Crear clips estratégicamente distribuidos con duración dinámica
-        clips_per_hour = 4  # Base para cálculo
+        clips_per_hour = 4
         total_clips = min(self.max_clips_per_video, max(2, int(duration / 3600 * clips_per_hour)))
-        
-        # Duración variable para clips de respaldo
+
         min_segment_duration = self.optimal_clip_duration[0]
         max_segment_duration = self.optimal_clip_duration[1]
-        
-        # Distribuir clips a lo largo del video
+
         for i in range(total_clips):
-            # Calcular posición estratégica en el video
-            segment_position = (i + 0.5) / total_clips  # Evitar inicio y final del video
-            start_time = segment_position * duration
-            
-            # Duración variable basada en la posición
-            if i == 0 or i == total_clips - 1:
-                segment_duration = min_segment_duration
-            else:
-                segment_duration = min_segment_duration + (max_segment_duration - min_segment_duration) * 0.5
-            
-            # Ajustar para no exceder la duración del video
-            end_time = min(start_time + segment_duration, duration)
+            segment_position = (i + 0.5) / total_clips
+
+            segment_duration = self._compute_backup_segment_duration(
+                position=segment_position,
+                index=i,
+                total=total_clips,
+                min_d=min_segment_duration,
+                max_d=max_segment_duration
+            )
+
+            center = segment_position * duration
+            start_time = max(0, center - segment_duration / 2)
+            end_time = min(duration, start_time + segment_duration)
             start_time = max(0, end_time - segment_duration)
-            
+
             if end_time - start_time >= self.absolute_min_duration:
                 segments.append((start_time, end_time))
                 logger.info(f"Segmento de respaldo {i+1}: {start_time:.1f}s - {end_time:.1f}s "
                            f"(duración: {end_time - start_time:.1f}s)")
+
         
         return segments
     
