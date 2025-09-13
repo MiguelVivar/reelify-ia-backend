@@ -523,7 +523,6 @@ REGLAS TEMPORALES DINÁMICAS:
 - Duración COMPLETAMENTE FLEXIBLE: 15 segundos - 3 minutos según el contenido
 - Clips cortos (15-30s): Para momentos de máximo impacto, reacciones explosivas
 - Clips medianos (30-90s): Para historias completas, explicaciones valiosas
-- Clips largos (90-180s): Para contenido educativo profundo, debates completos
 - MÍNIMO 1 MINUTO de separación entre clips
 - SIN LÍMITE FIJO de clips - encuentra TODOS los momentos virales
 - La duración debe ajustarse PERFECTAMENTE al contenido

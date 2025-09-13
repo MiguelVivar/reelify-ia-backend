@@ -585,13 +585,18 @@ class VideoConversionService:
                                         if int(progress) > last_progress and int(progress) % 5 == 0:
                                             last_progress = int(progress)
                                             
-                                            # Obtener tamaño actual del archivo
+                                            # Obtener tamaño actual del archivo y loguearlo
                                             current_size = 0
                                             if os.path.exists(output_path):
-                                                current_size = os.path.getsize(output_path)
-                                                size_mb = current_size / (1024 * 1024)
+                                                try:
+                                                    current_size = os.path.getsize(output_path)
+                                                    size_mb = current_size / (1024 * 1024)
+                                                except Exception:
+                                                    current_size = 0
+                                                    size_mb = 0
                                             else:
                                                 size_mb = 0
+                                            print(f"🔎 [Monitor] Progreso detectado {int(progress)}% - tamaño actual: {size_mb:.2f} MB")
                                             
                                             # Obtener información adicional de la línea
                                             fps = "N/A"

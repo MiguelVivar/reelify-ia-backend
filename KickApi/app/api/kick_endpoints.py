@@ -7,6 +7,7 @@ import asyncio
 from typing import Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
+from urllib.parse import quote as urlquote
 from app.services.kick_service import kick_service
 from app.services import SystemVerificationService
 from app.services.video_conversion import VideoConversionService
@@ -93,8 +94,11 @@ async def download_clip(clip_id: str, format: str, background_tasks: BackgroundT
         filename = f"{clip_data['title'] or 'clip'}_{clip_id}{quality_suffix}.{format}"
         filename = filename.replace("/", "_").replace("\\", "_")  # Limpiar nombre de archivo
         
+        # Crear Content-Disposition seguro: include filename (ASCII fallback) y filename* (UTF-8 pct-encoded)
+        safe_ascii = ''.join(c if ord(c) < 128 else '_' for c in filename)
+        quoted_name = urlquote(filename)
         headers = {
-            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Disposition": f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{quoted_name}",
             "Content-Length": str(file_size)
         }
         
@@ -144,7 +148,13 @@ async def download_video(uuid: str, format: str, background_tasks: BackgroundTas
     # Verificar si ya hay una descarga en progreso
     if download_key in _download_locks:
         print(f"⏳ Descarga ya en progreso para {download_key}, esperando...")
-        await _download_locks[download_key]
+        # Esperar al evento correctamente usando .wait()
+        try:
+            await _download_locks[download_key].wait()
+        except Exception as e:
+            print(f"⚠️ Error esperando lock de descarga: {e}")
+
+        # Si la descarga fue completada y está en caché, reutilizarla
         if download_key in _download_cache:
             print(f"✅ Reutilizando descarga completada para {download_key}")
             cached_result = _download_cache[download_key]
@@ -214,8 +224,11 @@ async def download_video(uuid: str, format: str, background_tasks: BackgroundTas
         filename = f"{video_data['title'] or 'video'}_{uuid}{quality_suffix}.{format}"
         filename = filename.replace("/", "_").replace("\\", "_").replace(":", "_")  # Limpiar nombre de archivo
         
+        # Crear Content-Disposition seguro: include filename (ASCII fallback) y filename* (UTF-8 pct-encoded)
+        safe_ascii = ''.join(c if ord(c) < 128 else '_' for c in filename)
+        quoted_name = urlquote(filename)
         headers = {
-            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Disposition": f"attachment; filename=\"{safe_ascii}\"; filename*=UTF-8''{quoted_name}",
             "Content-Length": str(file_size)
         }
         
