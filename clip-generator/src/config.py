@@ -69,4 +69,11 @@ class Settings:
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Control para forzar cobertura total al dividir segmentos (útil para vídeos largos)
+    force_full_coverage: bool = os.getenv("FORCE_FULL_COVERAGE", "false").lower() in ("1", "true", "yes")
+
+    # Whisper configuration (lazy load control)
+    whisper_model_name: str = os.getenv("WHISPER_MODEL_NAME", "base")
+    whisper_load_on_start: bool = os.getenv("WHISPER_LOAD_ON_START", "false").lower() in ("1", "true", "yes")
+
 settings = Settings()

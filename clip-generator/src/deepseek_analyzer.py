@@ -30,6 +30,7 @@ class ClipCandidate:
     audio_energy: float
     final_score: float
     reason: str
+    transcription: str
     confidence: float
 
 class ViralContentDetector:
@@ -127,12 +128,8 @@ class DeepseekVideoAnalyzer:
         self.absolute_max_duration = settings.absolute_max_clip_duration  # Máximo absoluto
         
         # Inicializar Whisper para transcripciones
-        try:
-            self.whisper_model = whisper.load_model("base")
-            logger.info("Modelo Whisper cargado correctamente")
-        except Exception as e:
-            logger.error(f"Error cargando modelo Whisper: {e}")
-            self.whisper_model = None
+        # No cargar Whisper automáticamente: usar carga perezosa en _transcribe_segment
+        self.whisper_model = None
         
         os.makedirs(self.temp_dir, exist_ok=True)
 
@@ -216,6 +213,61 @@ class DeepseekVideoAnalyzer:
         else:
             # Demasiado rápido
             clarity_score = optimal_wps_range[1] / words_per_second
+        return float(max(0.0, min(1.0, clarity_score)))
+
+    def _compute_candidate_duration(self, candidate: ClipCandidate, video_duration: Optional[float] = None) -> float:
+        """Calcula una duración objetivo para un candidato combinando:
+        - Duración sugerida por Deepseek (si está en la razón o metadata)
+        - Densidad de palabras (words/sec) para evitar clips demasiado largos o cortos
+        - Jitter determinista por índice para evitar duraciones idénticas
+        - Respeta límites absolutos y rango óptimo
+        """
+        # Preferencia por duración óptima del sistema (rango)
+        min_opt, max_opt = self.optimal_clip_duration
+
+        # Intentar extraer sugerencia de duración del reason o metadata
+        suggested = None
+        try:
+            # Buscar patrones tipo 'duración: 12s' o 'optimal_duration' si viene en metadata
+            m = re.search(r'(\b\d+(?:\.\d+)?)(?:s|sec|secs)?', candidate.reason or '')
+            if m:
+                suggested = float(m.group(1))
+        except Exception:
+            suggested = None
+
+        # Calcular words/sec a partir de la transcripción
+        words = (candidate.transcription or '').split()
+        word_count = max(0, len(words))
+        cand_duration_est = (candidate.end - candidate.start) if (candidate.end > candidate.start) else None
+
+        words_per_second = None
+        if cand_duration_est and cand_duration_est > 0:
+            words_per_second = word_count / cand_duration_est
+
+        # Base duration heuristic
+        if suggested:
+            target = suggested
+        elif words_per_second and words_per_second > 0:
+            # Ajustar la duración para que la densidad caiga en un rango óptimo (2-4 wps)
+            optimal_wps = 3.0
+            target = max(min_opt, min(max_opt, (word_count / optimal_wps) if word_count > 0 else min_opt))
+        elif cand_duration_est:
+            target = cand_duration_est
+        else:
+            target = (min_opt + max_opt) / 2.0
+
+        # Aplicar jitter determinista basado en start para reproducibilidad
+        jitter = (hash((round(candidate.start, 3), round(candidate.end, 3))) % 11 - 5) / 100.0  # +-0.05 ajuste
+        target = target * (1.0 + jitter)
+
+        # Clamp final
+        target = max(self.absolute_min_duration, min(self.absolute_max_duration, target))
+
+        # No exceder duración total del video
+        if video_duration:
+            target = min(target, video_duration)
+
+        return float(target)
         
         # Bonus por diversidad de vocabulario
         unique_words = len(set(word.lower() for word in words))
@@ -396,6 +448,7 @@ class DeepseekVideoAnalyzer:
             # 3. Transcribir cada segmento
             segment_transcriptions = []
             for i, (start, end) in enumerate(segments):
+                logger.info(f"Transcribiendo segmento {i+1}/{len(segments)}: {start:.1f}s - {end:.1f}s")
                 transcription = await self._transcribe_segment(video_path, start, end)
                 if transcription:
                     segment_transcriptions.append({
@@ -404,6 +457,11 @@ class DeepseekVideoAnalyzer:
                         'transcription': transcription,
                         'segment_index': i
                     })
+                    logger.info(f"Segmento {i+1} transcrito: {len(transcription)} caracteres")
+                else:
+                    logger.warning(f"No se pudo transcribir el segmento {i+1}")
+
+            logger.info(f"Transcripciones totales recogidas: {len(segment_transcriptions)} de {len(segments)} segmentos")
             
             # 4. Analizar con Deepseek
             highlights = await self._analyze_with_deepseek(segment_transcriptions)
@@ -420,14 +478,50 @@ class DeepseekVideoAnalyzer:
     
     def _create_analysis_segments(self, duration: float) -> List[Tuple[float, float]]:
         """Crea segmentos para análisis del video completo"""
-        segments = []
-        current_time = 0.0
-        
-        while current_time < duration and len(segments) < self.max_segments:
-            end_time = min(current_time + self.segment_duration, duration)
-            segments.append((current_time, end_time))
-            current_time += self.segment_duration
-        
+        segments: List[Tuple[float, float]] = []
+
+        # Si se fuerza cobertura completa, generamos segmentos contiguos hasta un tope seguro
+        if getattr(settings, 'force_full_coverage', False):
+            max_safe_segments = min(self.max_segments, 300)  # tope de seguridad
+            estimated_segments = int((duration + self.segment_duration - 1) // self.segment_duration)
+            if estimated_segments > max_safe_segments:
+                logger.warning(f"FORCE_FULL_COVERAGE activo pero el número de segmentos ({estimated_segments}) excede el tope seguro ({max_safe_segments}). Se usarán {max_safe_segments} segmentos distribuidos uniformemente.")
+                # distribuir max_safe_segments a lo largo del video
+                step = duration / max_safe_segments
+                for i in range(max_safe_segments):
+                    start = max(0.0, i * step)
+                    end = min(duration, start + self.segment_duration)
+                    if end - start >= 0.01:
+                        segments.append((start, end))
+                return segments
+            # si está dentro del tope, hacer segmentos contiguos
+            current_time = 0.0
+            while current_time < duration and len(segments) < estimated_segments:
+                end_time = min(current_time + self.segment_duration, duration)
+                segments.append((current_time, end_time))
+                current_time += self.segment_duration
+            return segments
+
+        # Comportamiento por defecto: si el video cabe en max_segments se hacen contiguos
+        if duration <= self.segment_duration * self.max_segments:
+            current_time = 0.0
+            while current_time < duration and len(segments) < self.max_segments:
+                end_time = min(current_time + self.segment_duration, duration)
+                segments.append((current_time, end_time))
+                current_time += self.segment_duration
+            return segments
+
+        # Si el video es mucho más largo que el número máximo de segmentos,
+        # distribuimos `max_segments` ventanas a lo largo de todo el video para cubrir todas las partes.
+        total_slots = self.max_segments
+        step = duration / total_slots
+        for i in range(total_slots):
+            start = max(0.0, i * step)
+            end = min(duration, start + self.segment_duration)
+            if end - start < 0.01:
+                continue
+            segments.append((start, end))
+
         return segments
 
     def _compute_backup_segment_duration(self, position: float, index: int, total: int, min_d: float, max_d: float) -> float:
@@ -482,11 +576,75 @@ class DeepseekVideoAnalyzer:
         seed = (index + 1) * 9781
         val = (a * seed + c) % m
         return (val / m)
+
+    def _parse_time_to_seconds(self, value: Any) -> Optional[float]:
+        """Parsea distintos formatos de tiempo a segundos.
+
+        Acepta números (int/float), cadenas como 'mm:ss' o 'hh:mm:ss' o '123.5'.
+        Devuelve None si no puede parsear.
+        """
+        if value is None:
+            return None
+        try:
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                v = value.strip()
+                # Formato hh:mm:ss o mm:ss
+                parts = v.split(":")
+                if len(parts) == 3:
+                    h, m, s = parts
+                    return float(h) * 3600 + float(m) * 60 + float(s)
+                if len(parts) == 2:
+                    m, s = parts
+                    return float(m) * 60 + float(s)
+                # Simple número en string
+                return float(v)
+        except Exception:
+            return None
+
+    def _clamp(self, val: float, low: float, high: float) -> float:
+        return max(low, min(high, val))
+
+    def _extract_json_from_text(self, text: str) -> Optional[str]:
+        """Extrae el primer objeto JSON válido de un texto que puede contener markdown u otros wrappers.
+
+        Devuelve la substring con JSON o None si no encuentra.
+        """
+        if not text:
+            return None
+        # Intento simple: buscar primer '{' y último '}'
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            candidate = text[start:end+1]
+            return candidate
+
+        # Eliminar bloques de código Markdown y buscar de nuevo
+        cleaned = re.sub(r'```[\s\S]*?```', '', text)
+        cleaned = cleaned.strip()
+        start = cleaned.find('{')
+        end = cleaned.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            return cleaned[start:end+1]
+
+        return None
     
     async def _transcribe_segment(self, video_path: str, start_time: float, end_time: float) -> Optional[str]:
         """Transcribe un segmento específico del video"""
+        # Lazy-load modelo Whisper si está configurado para cargarse en inicio o si no está aún cargado
         if not self.whisper_model:
-            logger.warning("Modelo Whisper no disponible")
+            try:
+                if settings.whisper_load_on_start or True:
+                    model_name = getattr(settings, 'whisper_model_name', 'base')
+                    logger.info(f"Cargando modelo Whisper '{model_name}' para transcripción (lazy-load)")
+                    self.whisper_model = whisper.load_model(model_name)
+                    logger.info("Modelo Whisper cargado correctamente (lazy)")
+            except Exception as e:
+                logger.error(f"Error cargando modelo Whisper: {e}")
+                self.whisper_model = None
+        if not self.whisper_model:
+            logger.warning("Modelo Whisper no disponible tras intento de carga")
             return None
         
         try:
@@ -498,13 +656,37 @@ class DeepseekVideoAnalyzer:
             
             # Usar ffmpeg para extraer el audio del segmento
             try:
-                (
-                    ffmpeg
-                    .input(video_path, ss=start_time, t=end_time - start_time)
-                    .output(audio_path, acodec='pcm_s16le', ac=1, ar='16000')
-                    .overwrite_output()
-                    .run(quiet=True, timeout=30)  # Timeout de 30 segundos
-                )
+                try:
+                    (
+                        ffmpeg
+                        .input(video_path, ss=start_time, t=end_time - start_time)
+                        .output(audio_path, acodec='pcm_s16le', ac=1, ar='16000')
+                        .overwrite_output()
+                        .run(quiet=True)
+                    )
+                except Exception as e:
+                    # Fallback robusto: intentar invocar ffmpeg directamente por subprocess
+                    logger.warning(f"ffmpeg-python falló ({e}), intentando fallback con subprocess")
+                    cmd = [
+                        'ffmpeg',
+                        '-y',
+                        '-ss', str(start_time),
+                        '-t', str(end_time - start_time),
+                        '-i', video_path,
+                        '-acodec', 'pcm_s16le',
+                        '-ac', '1',
+                        '-ar', '16000',
+                        audio_path
+                    ]
+                    try:
+                        completed = subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+                        if completed.returncode != 0:
+                            logger.error(f"FFmpeg returned non-zero code: {completed.returncode} - {completed.stderr.decode(errors='ignore')}" )
+                    except subprocess.TimeoutExpired as te:
+                        logger.error(f"FFmpeg timeout al extraer segmento: {te}")
+                    except subprocess.CalledProcessError as ce:
+                        stderr = ce.stderr.decode(errors='ignore') if ce.stderr else str(ce)
+                        logger.error(f"FFmpeg error en subprocess: {stderr}")
             except Exception as e:
                 logger.error(f"Error extrayendo audio del segmento: {e}")
                 return None
@@ -648,50 +830,94 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
                         content = result["choices"][0]["message"]["content"]
                         
                         logger.info(f"Respuesta de Deepseek recibida: {content[:200]}...")
-                        
-                        # Parsear la respuesta JSON
+
+                        # Parsear la respuesta JSON robustamente
                         try:
-                            analysis_result = json.loads(content)
+                            json_text = self._extract_json_from_text(content)
+                            if json_text is None:
+                                raise json.JSONDecodeError('No JSON found', content, 0)
+                            analysis_result = json.loads(json_text)
                             highlights = analysis_result.get("highlights", [])
-                            
+
                             logger.info(f"Deepseek parseó {len(highlights)} highlights candidatos")
-                            
+
+                            # Calcular duración aproximada del video a partir de segmentos (fallback)
+                            if segment_transcriptions:
+                                video_duration = max(seg.get('end', 0) for seg in segment_transcriptions)
+                            else:
+                                video_duration = 0.0
+
                             # Mapear índices de segmento a tiempos reales
                             mapped_highlights = []
                             for i, highlight in enumerate(highlights):
                                 segment_idx = highlight.get("segment_index", 0)
                                 if segment_idx < len(segment_transcriptions):
                                     segment = segment_transcriptions[segment_idx]
-                                    
-                                    # Usar tiempos específicos de Deepseek si están disponibles
-                                    start_time = highlight.get("start_time")
-                                    end_time = highlight.get("end_time")
-                                    
-                                    if start_time is not None and end_time is not None:
-                                        # Usar tiempos específicos de Deepseek
-                                        final_start = float(start_time)
-                                        final_end = float(end_time)
+
+                                    # Intentar parsear distintos formatos que pueda devolver Deepseek
+                                    raw_start = highlight.get("start_time")
+                                    raw_end = highlight.get("end_time")
+                                    raw_duration = highlight.get("duration") or highlight.get("optimal_duration")
+
+                                    parsed_start = self._parse_time_to_seconds(raw_start)
+                                    parsed_end = self._parse_time_to_seconds(raw_end)
+                                    parsed_duration = self._parse_time_to_seconds(raw_duration)
+
+                                    # Si ambos tiempos están presentes y válidos, úsalos
+                                    if parsed_start is not None and parsed_end is not None:
+                                        final_start = parsed_start
+                                        final_end = parsed_end
                                         logger.info(f"Highlight {i+1}: Usando tiempos específicos de Deepseek: {final_start:.2f}s - {final_end:.2f}s")
                                     else:
-                                        # Usar tiempos del segmento como fallback
-                                        final_start = segment["start"]
-                                        final_end = segment["end"]
-                                        logger.info(f"Highlight {i+1}: Usando tiempos del segmento: {final_start:.2f}s - {final_end:.2f}s")
-                                    
+                                        # Si hay sólo duración, centrarla en el segmento
+                                        if parsed_duration is not None:
+                                            center_seg = (segment["start"] + segment["end"]) / 2
+                                            final_start = center_seg - parsed_duration / 2
+                                            final_end = center_seg + parsed_duration / 2
+                                            logger.info(f"Highlight {i+1}: Usando duration proporcionada: {parsed_duration:.1f}s -> {final_start:.2f}s - {final_end:.2f}s")
+                                        else:
+                                            # Fallback al segmento completo, con intento de ajustar al texto (si Deepseek indica offsets relativos)
+                                            final_start = segment["start"]
+                                            final_end = segment["end"]
+                                            # Intento: si start_time es string tipo '00:01:23' relativo al segmento, convertir sumando
+                                            if isinstance(raw_start, str) and ":" in raw_start:
+                                                rel = self._parse_time_to_seconds(raw_start)
+                                                if rel is not None and rel < (segment["end"] - segment["start"]):
+                                                    final_start = segment["start"] + rel
+                                            if isinstance(raw_end, str) and ":" in raw_end:
+                                                rel = self._parse_time_to_seconds(raw_end)
+                                                if rel is not None and rel <= (segment["end"] - segment["start"]):
+                                                    final_end = segment["start"] + rel
+                                            logger.info(f"Highlight {i+1}: Usando tiempos del segmento como fallback: {final_start:.2f}s - {final_end:.2f}s")
+
+                                    # Clamp dentro del video
+                                    final_start = self._clamp(final_start, 0.0, video_duration)
+                                    final_end = self._clamp(final_end, 0.0, video_duration)
+
+                                    # Si end <= start, expandir ligeramente alrededor del segmento
+                                    if final_end <= final_start:
+                                        final_start = max(0.0, segment["start"]) 
+                                        final_end = min(video_duration, segment["end"]) 
+
+                                    # Asegurar duración mínima
+                                    if final_end - final_start < self.absolute_min_duration:
+                                        add = (self.absolute_min_duration - (final_end - final_start)) / 2
+                                        final_start = max(0.0, final_start - add)
+                                        final_end = min(video_duration, final_end + add)
+
                                     mapped_highlights.append({
-                                        "start": final_start,
-                                        "end": final_end,
-                                        "score": highlight.get("score", 0.5),
+                                        "start": float(final_start),
+                                        "end": float(final_end),
+                                        "score": float(highlight.get("score", 0.5)),
                                         "reason": highlight.get("reason", "Momento destacado identificado por IA"),
-                                        "transcription": segment["transcription"]
+                                        "transcription": segment.get("transcription", "")
                                     })
-                            
+
                             # Filtrar clips solapados o muy cercanos
                             filtered_highlights = self._filter_overlapping_clips(mapped_highlights)
-                            
                             logger.info(f"Deepseek identificó {len(mapped_highlights)} highlights, filtrados a {len(filtered_highlights)} clips válidos")
                             return filtered_highlights
-                            
+
                         except json.JSONDecodeError as e:
                             logger.error(f"Error parseando respuesta de Deepseek: {e}")
                             logger.error(f"Contenido recibido: {content}")
@@ -715,44 +941,81 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         
         logger.info(f"Iniciando filtrado avanzado de {len(highlights)} clips candidatos")
         
-        # Convertir a ClipCandidates con análisis completo
-        candidates = []
+        # Convertir a ClipCandidates con análisis completo y generar candidatos alternativos
+        candidates: List[ClipCandidate] = []
         for highlight in highlights:
-            start = highlight["start"]
-            end = highlight["end"]
-            transcription = highlight.get("transcription", "")
-            base_score = highlight.get("score", 0.5)
-            
+            start = float(highlight["start"])
+            end = float(highlight["end"])
+            transcription = highlight.get("transcription", "") or ""
+            base_score = float(highlight.get("score", 0.5))
+
             # Análisis viral avanzado
             viral_analysis = self._analyze_viral_content(transcription)
             emotional_intensity = viral_analysis['score']
             confidence = viral_analysis['confidence']
-            
+
             # Análisis de claridad del habla
-            duration = end - start
+            duration = max(0.01, end - start)
             speech_clarity = self._analyze_speech_clarity(transcription, duration)
-            
+
             # Análisis de flujo conversacional
             conversation_flow = self._analyze_conversation_flow(transcription)
-            
-            # Crear candidato
+
+            # Keyword density (palabras por segundo)
+            keyword_density = len(transcription.split()) / duration if duration > 0 else 0.0
+
+            # Audio energy placeholder (puede estimarse via librosa si se dispone del audio)
+            audio_energy = 0.5
+
+            # Crear candidato principal
             candidate = ClipCandidate(
                 start=start,
                 end=end,
                 base_score=base_score,
                 emotional_intensity=emotional_intensity,
                 speech_clarity=speech_clarity,
-                keyword_density=len(transcription.split()) / max(duration, 1),
+                keyword_density=keyword_density,
                 conversation_flow=conversation_flow,
-                audio_energy=0.5,  # Placeholder - se podría calcular del audio
-                final_score=0.0,  # Se calculará después
+                audio_energy=audio_energy,
+                final_score=0.0,
                 reason=highlight.get("reason", "Momento destacado"),
+                transcription=transcription,
                 confidence=confidence
             )
-            
+
             # Calcular score final avanzado
             candidate.final_score = self._calculate_advanced_score(candidate)
             candidates.append(candidate)
+
+            # Generar variantes: usar la heurística de duration y añadir pequeñas variaciones deterministas
+            base_target = self._compute_candidate_duration(candidate)
+            # Variantes: extendida (contexto), compacta (gancho) y original ajustada
+            variant_factors = [1.25, 0.85, 1.0]
+            for factor in variant_factors:
+                target = max(self.absolute_min_duration, min(self.absolute_max_duration, base_target * factor))
+                # determinista pequeño offset para evitar duraciones idénticas
+                offset = ((hash((round(start,2), round(target,2), int(factor*100))) % 9) - 4) / 100.0
+                target = max(self.absolute_min_duration, target * (1.0 + offset))
+                center = (start + end) / 2.0
+                s = max(0.0, center - target / 2.0)
+                e = s + target
+                if e - s >= self.absolute_min_duration:
+                    var_candidate = ClipCandidate(
+                        start=s,
+                        end=e,
+                        base_score=base_score * (0.98 if factor==1.0 else 0.95),
+                        emotional_intensity=emotional_intensity,
+                        speech_clarity=speech_clarity,
+                        keyword_density=keyword_density,
+                        conversation_flow=conversation_flow,
+                        audio_energy=audio_energy,
+                        final_score=0.0,
+                        reason=f"{highlight.get('reason', 'Momento')} (variante)",
+                        transcription=transcription,
+                        confidence=confidence
+                    )
+                    var_candidate.final_score = self._calculate_advanced_score(var_candidate)
+                    candidates.append(var_candidate)
         
         # Aplicar algoritmo de selección óptima
         optimal_clips = self._select_optimal_clips(candidates)
@@ -765,7 +1028,7 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
                 "end": candidate.end,
                 "score": candidate.final_score,
                 "reason": f"{candidate.reason} (Score: {candidate.final_score:.3f}, Confianza: {candidate.confidence:.3f})",
-                "transcription": highlights[0].get("transcription", ""),  # Buscar transcripción original
+                "transcription": getattr(candidate, 'transcription', ''),
                 "metadata": {
                     "emotional_intensity": candidate.emotional_intensity,
                     "speech_clarity": candidate.speech_clarity,
@@ -788,55 +1051,88 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         # Ordenar candidatos por tiempo de inicio
         candidates.sort(key=lambda x: x.start)
         
-        # Filtrar candidatos por score mínimo más flexible
-        min_viral_score = settings.viral_score_threshold  # Usar configuración dinámica
+        # Filtrar candidatos por score mínimo pero permitir mayor número basándonos en cantidad de candidatos
+        min_viral_score = settings.viral_score_threshold  # umbral base configurable
         viral_candidates = [c for c in candidates if c.final_score >= min_viral_score]
-        
+
         logger.info(f"Candidatos virales (score >= {min_viral_score}): {len(viral_candidates)} de {len(candidates)}")
-        
+
+        # Si no hay candidatos que cumplan el umbral, relajar progresivamente
         if not viral_candidates:
-            # Si no hay candidatos virales, relajar el criterio gradualmente
-            relaxed_thresholds = [0.5, 0.4, 0.3]
+            relaxed_thresholds = [0.55, 0.5, 0.45, 0.4, 0.35]
             for threshold in relaxed_thresholds:
                 viral_candidates = [c for c in candidates if c.final_score >= threshold]
                 if viral_candidates:
-                    logger.info(f"Usando threshold relajado de {threshold}: {len(viral_candidates)} candidatos encontrados")
+                    logger.info(f"Se encontraron candidatos con threshold relajado: {threshold} -> {len(viral_candidates)}")
                     break
-            
-            if not viral_candidates:
-                # Si aún no hay candidatos, tomar los mejores disponibles
-                candidates.sort(key=lambda x: x.final_score, reverse=True)
-                max_fallback_clips = min(3, len(candidates))
-                logger.info(f"Sin candidatos virales, tomando los {max_fallback_clips} mejores clips disponibles")
-                return candidates[:max_fallback_clips]
+
+        # Si aún no hay ninguno, tomar los N mejores (N mayor para generar más clips)
+        if not viral_candidates:
+            candidates_sorted = sorted(candidates, key=lambda x: x.final_score, reverse=True)
+            max_fallback_clips = min(max(5, int(len(candidates) * 0.5)), len(candidates))
+            logger.info(f"Sin candidatos virales, tomando los {max_fallback_clips} mejores clips disponibles (fallback)")
+            return candidates_sorted[:max_fallback_clips]
         
         # Aplicar algoritmo de selección con restricciones temporales dinámicas
         n = len(viral_candidates)
         if n == 1:
             return viral_candidates
-        
-        # Usar límite dinámico de clips basado en configuración
-        max_clips_allowed = min(self.max_clips_per_video, n)
-        
+
+        # Usar límite dinámico de clips basado en número de candidatos detectados
+        # Queremos permitir tantos clips virales como se hayan encontrado, hasta un tope razonable
+        dynamic_limit = min(self.max_clips_per_video, max(5, n))
+        max_clips_allowed = min(dynamic_limit, n)
+
         # Crear matriz de compatibilidad temporal
         compatible = [[False] * n for _ in range(n)]
         for i in range(n):
             for j in range(i + 1, n):
                 clip1, clip2 = viral_candidates[i], viral_candidates[j]
-                # Verificar separación mínima
-                separation = abs(clip1.start - clip2.end) if clip1.start > clip2.end else abs(clip2.start - clip1.end)
-                if separation >= self.min_clip_separation:
+                # Calcular solapamiento real
+                latest_start = max(clip1.start, clip2.start)
+                earliest_end = min(clip1.end, clip2.end)
+                overlap = max(0.0, earliest_end - latest_start)
+                # Solapamiento relativo sobre la duración mayor
+                max_duration = max(clip1.end - clip1.start, clip2.end - clip2.start, 1e-6)
+                overlap_ratio = overlap / max_duration
+                # Similitud textual
+                sim = self._text_similarity(getattr(clip1, 'transcription', ''), getattr(clip2, 'transcription', ''))
+                # Si son muy similares, requerir menos solapamiento permitido, si no, ser más permisivo
+                sim_threshold = 0.6
+                if sim >= sim_threshold:
+                    allowed_overlap = 0.35
+                else:
+                    allowed_overlap = 0.5
+                # Considerar compatibles si el overlap es pequeño y la separación minima se respeta
+                separation_ok = (clip2.start - clip1.end) >= self.min_clip_separation or (clip1.start - clip2.end) >= self.min_clip_separation
+                if overlap_ratio <= allowed_overlap or separation_ok:
                     compatible[i][j] = compatible[j][i] = True
+                else:
+                    compatible[i][j] = compatible[j][i] = False
         
-        # Programación dinámica para encontrar la mejor combinación
-        selected_clips = self._dp_optimal_selection(viral_candidates, compatible, max_clips_allowed)
-        
-        # Sin limitación artificial estricta - usar todos los clips válidos de calidad
-        logger.info(f"Clips seleccionados por algoritmo DP: {len(selected_clips)} de {n} candidatos")
-        
+        # Selección greedy primero: priorizar incluir tantos clips virales como sea posible
+        selected_clips = []
+        # Ordenar por score desc para intentar tomar los momentos más fuertes primero
+        for clip in sorted(viral_candidates, key=lambda x: x.final_score, reverse=True):
+            # Verificar que no solape excesivamente con clips ya seleccionados
+            overlaps = any(max(0.0, min(c.end, clip.end) - max(c.start, clip.start)) / max(1e-6, max(c.end - c.start, clip.end - clip.start)) > 0.6 for c in selected_clips)
+            separation_ok = all(abs(clip.start - c.end) >= self.min_clip_separation and abs(c.start - clip.end) >= self.min_clip_separation for c in selected_clips)
+            if not overlaps or separation_ok:
+                selected_clips.append(clip)
+            if len(selected_clips) >= max_clips_allowed:
+                break
+
+        # Si la selección greedy no devolvió suficientes clips y n>1, usar DP para obtener una alternativa
+        if len(selected_clips) < max_clips_allowed and n > 1:
+            dp_selected = self._dp_optimal_selection(viral_candidates, compatible, max_clips_allowed)
+            dp_score = sum(c.final_score for c in dp_selected)
+            greedy_score = sum(c.final_score for c in selected_clips)
+            if dp_score > greedy_score:
+                selected_clips = dp_selected
+
+        logger.info(f"Clips seleccionados: {len(selected_clips)} de {n} candidatos (max allowed {max_clips_allowed})")
         # Ordenar por tiempo para resultado final
         selected_clips.sort(key=lambda x: x.start)
-        
         return selected_clips
 
     def _dp_optimal_selection(self, candidates: List[ClipCandidate], compatible: List[List[bool]], max_clips: int) -> List[ClipCandidate]:
@@ -849,9 +1145,9 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         max_clips_dynamic = min(max_clips, n)
         
         # dp[i][k] = (score_máximo, clips_seleccionados) usando hasta el clip i con k clips
-        dp = [[(0.0, [])] * (max_clips_dynamic + 1) for _ in range(n)]
-        
-        # Inicialización
+        dp = [[(0.0, []) for _ in range(max_clips_dynamic + 1)] for _ in range(n)]
+
+        # Inicialización para el primer elemento
         for k in range(max_clips_dynamic + 1):
             if k == 1:
                 dp[0][k] = (candidates[0].final_score, [candidates[0]])
@@ -873,17 +1169,32 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
                         if current_candidate.final_score > dp[i][k][0]:
                             dp[i][k] = (current_candidate.final_score, [current_candidate])
                     else:
-                        # Buscar el mejor clip compatible anterior
+                        # Buscar el mejor clip compatible anterior considerando diversidad textual
                         best_score = 0.0
                         best_combination = []
-                        
+
                         for j in range(i):
                             if compatible[j][i] and dp[j][k-1][0] > 0:
-                                combined_score = dp[j][k-1][0] + current_candidate.final_score
+                                prev_score, prev_list = dp[j][k-1]
+                                # Penalizar similitud entre current_candidate y cada clip en prev_list
+                                sim_penalty = 0.0
+                                unique_tokens = set()
+                                for pc in prev_list:
+                                    s = self._text_similarity(getattr(pc, 'transcription', ''), getattr(current_candidate, 'transcription', ''))
+                                    sim_penalty += s
+                                    unique_tokens.update([w.lower() for w in getattr(pc, 'transcription', '').split() if w.strip()])
+
+                                # Calcular diversity bonus proporcional a tokens únicos nuevos
+                                current_tokens = set([w.lower() for w in getattr(current_candidate, 'transcription', '').split() if w.strip()])
+                                new_tokens = current_tokens - unique_tokens
+                                diversity_bonus = min(0.2, len(new_tokens) / max(1, len(current_tokens))) if current_tokens else 0.0
+
+                                combined_score = prev_score + current_candidate.final_score - (sim_penalty * 0.15) + diversity_bonus
                                 if combined_score > best_score:
                                     best_score = combined_score
-                                    best_combination = dp[j][k-1][1] + [current_candidate]
-                        
+                                    # create a new list to avoid shared references
+                                    best_combination = list(prev_list) + [current_candidate]
+
                         if best_score > dp[i][k][0]:
                             dp[i][k] = (best_score, best_combination)
         
@@ -899,6 +1210,18 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         
         logger.info(f"Algoritmo DP seleccionó {len(best_clips)} clips con score total: {best_score:.3f}")
         return best_clips
+
+    def _text_similarity(self, a: str, b: str) -> float:
+        """Simple similitud Jaccard basada en tokens de palabras (0..1)."""
+        if not a or not b:
+            return 0.0
+        sa = set([w.strip('.,!?;:()"\'').lower() for w in a.split() if w.strip()])
+        sb = set([w.strip('.,!?;:()"\'').lower() for w in b.split() if w.strip()])
+        if not sa or not sb:
+            return 0.0
+        inter = sa.intersection(sb)
+        union = sa.union(sb)
+        return float(len(inter) / len(union))
     
     def _validate_viral_potential(self, clips: List[Dict]) -> List[Dict]:
         """
@@ -971,21 +1294,41 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
                 start = new_start
                 end = new_end
                 duration = end - start
+                # Aplicar jitter determinista leve a la duración para diversidad entre clips
+                jitter = (self._deterministic_jitter(int(start*1000)) - 0.5) * 0.08  # +-8%
+                duration = max(self.absolute_min_duration, min(self.absolute_max_duration, duration * (1.0 + jitter)))
+                # Recalcular start/end manteniendo el centro
+                start = max(0, center_time - duration / 2)
+                end = min(video_duration, start + duration)
             else:
-                # Validar duración contra límites absolutos
-                if duration < self.absolute_min_duration:
-                    # Extender el clip para alcanzar la duración mínima absoluta
-                    extension = (self.absolute_min_duration - duration) / 2
-                    start = max(0, start - extension)
-                    end = min(video_duration, end + extension)
-                    duration = end - start
-                    logger.info(f"Clip extendido a duración mínima: {duration:.1f}s")
-                
-                if duration > self.absolute_max_duration:
-                    # Acortar el clip a la duración máxima absoluta
-                    end = start + self.absolute_max_duration
-                    duration = self.absolute_max_duration
-                    logger.info(f"Clip acortado a duración máxima: {duration:.1f}s")
+                # Calcular una duración objetivo usando heurística basada en transcripción y metadata
+                fake_candidate = ClipCandidate(
+                    start=start,
+                    end=end,
+                    base_score=score,
+                    emotional_intensity=0.0,
+                    speech_clarity=0.0,
+                    keyword_density=0.0,
+                    conversation_flow=0.0,
+                    audio_energy=0.0,
+                    final_score=score,
+                    reason=reason,
+                    transcription=highlight.get('transcription', ''),
+                    confidence=0.5
+                )
+
+                target_duration = self._compute_candidate_duration(fake_candidate, video_duration=video_duration)
+                # Ajustar el clip manteniendo el centro del momento
+                center = (start + end) / 2.0
+                # Aplicar pequeñas variantes deterministas para generar múltiples opciones
+                base_target = target_duration
+                variants = [0.85, 1.0, 1.25]
+                chosen_variant = variants[int(abs(hash((start, end))) % len(variants))]
+                target_duration = max(self.absolute_min_duration, min(self.absolute_max_duration, base_target * chosen_variant))
+                start = max(0, center - target_duration / 2)
+                end = min(video_duration, center + target_duration / 2)
+                duration = end - start
+                logger.info(f"Clip ajustado dinámicamente: {start:.1f}s - {end:.1f}s (duración objetivo: {target_duration:.1f}s)")
             
             clip_data = {
                 "start": start,
@@ -1024,7 +1367,12 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
                 start = max(0, center_time - target_duration / 2)
                 end = center_time + target_duration / 2
                 duration = end - start
-                logger.info(f"Aplicando duración óptima de Deepseek: {target_duration:.1f}s")
+                # Añadir pequeña variación determinista por clip
+                jitter = (self._deterministic_jitter(int(start*1000)) - 0.5) * 0.08
+                duration = max(self.absolute_min_duration, min(self.absolute_max_duration, duration * (1.0 + jitter)))
+                start = max(0, center_time - duration / 2)
+                end = min(end, start + duration)
+                logger.info(f"Aplicando duración óptima de Deepseek: {target_duration:.1f}s (ajustada a {duration:.1f}s)")
             else:
                 # Ajustar duración si es necesario con límites absolutos
                 if duration < self.absolute_min_duration:
@@ -1038,6 +1386,34 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
                     # Acortar el clip a la duración máxima
                     end = start + self.absolute_max_duration
                     duration = self.absolute_max_duration
+
+            # Generar una variante compacta y una extendida si el clip está dentro de un rango adecuado
+            try:
+                center_time = (start + end) / 2
+                base_duration = duration
+                variants = []
+                # Compacta (gancho)
+                compact = max(self.absolute_min_duration, base_duration * 0.75)
+                # Extendida (contexto)
+                extended = min(self.absolute_max_duration, base_duration * 1.4)
+                # Añadir si son diferentes
+                if abs(compact - base_duration) / base_duration > 0.12:
+                    variants.append((center_time - compact / 2, center_time + compact / 2))
+                if abs(extended - base_duration) / base_duration > 0.12:
+                    variants.append((center_time - extended / 2, center_time + extended / 2))
+                # Insertar variantes deterministas antes del clip principal para aumentar número de salidas
+                for vs, ve in variants:
+                    vs_clamped = max(0, vs)
+                    ve_clamped = min(ve, ve if ve <= (vs + self.absolute_max_duration) else vs + self.absolute_max_duration)
+                    if ve_clamped - vs_clamped >= self.absolute_min_duration:
+                        clips.append({
+                            "start": vs_clamped,
+                            "end": ve_clamped,
+                            "score": highlight.get("score", 0.5),
+                            "reason": f"Variante - {highlight.get('reason', '')}"
+                        })
+            except Exception:
+                pass
             
             clips.append({
                 "start": start,
