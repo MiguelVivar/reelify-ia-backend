@@ -217,6 +217,20 @@ curl -X POST "http://localhost:8002/api/v1/select-viral-clips" \
   -d '{"clips": [{"url": "https://storage.asumarket.com/agentetiktok/clips/raw/clip_1.mp4"}]}'
 ```
 
+### Limpiar cache / archivos temporales
+
+Puedes limpiar toda la cache y archivos temporales del servicio `clip-generator` usando el endpoint DELETE:
+
+```bash
+# Usando curl desde el host
+curl -X DELETE "http://localhost:8001/api/v1/cache"
+
+# O desde dentro del contenedor (si usas docker-compose)
+docker-compose exec clip-generator pwsh -c "curl -X DELETE http://localhost:8001/api/v1/cache"
+```
+
+Este endpoint eliminará el directorio `TEMP_DIR` configurado en `.env` para `clip-generator` (por defecto `/tmp/video_processing`) incluyendo clips temporales y videos descargados.
+
 ### 2. Test con Python
 
 ```python

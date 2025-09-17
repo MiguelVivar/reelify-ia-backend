@@ -137,3 +137,38 @@ async def cleanup_temp_clips():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al limpiar clips: {str(e)}"
         )
+
+
+@router.delete("/cache")
+async def cleanup_all_cache():
+    """
+    Endpoint para limpiar toda la cache y archivos temporales del servicio.
+    Esto eliminará `settings.temp_dir` completo (videos descargados, clips temporales, etc.).
+    """
+    try:
+        # Limpiar clips temporales en memoria y en disco
+        try:
+            service.file_service.cleanup_temp_clips()
+        except Exception:
+            # continuar incluso si falla la limpieza por partes
+            pass
+
+        # Limpiar todo el directorio temporal
+        report = service.file_service.cleanup_all_cache()
+
+        # Si hay errores reportados, devolver 500 con detalles
+        if report.get("errors"):
+            logger.error(f"Errores durante limpieza de cache: {report['errors']}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={"message": "Errores eliminando archivos", "report": report}
+            )
+
+        # Responder con el informe (incluye removed/skipped)
+        return {"message": "Cache limpiada (parcialmente si había recursos ocupados)", "report": report}
+    except Exception as e:
+        logger.error(f"Error al limpiar toda la cache: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al limpiar la cache: {str(e)}"
+        )

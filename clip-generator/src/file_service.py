@@ -199,3 +199,115 @@ class FileDownloadService:
                 logger.debug(f"Archivo temporal limpiado: {file_path}")
         except Exception as e:
             logger.warning(f"No se pudo limpiar {file_path}: {e}")
+
+    def cleanup_all_cache(self):
+        """
+        Limpia todo el directorio temporal usado por el servicio, incluyendo clips y videos descargados.
+        Use con precaución: eliminará todo en `settings.temp_dir`.
+        """
+        import errno
+
+        report = {
+            "removed": [],
+            "skipped": [],
+            "errors": []
+        }
+
+        try:
+            if not os.path.exists(settings.temp_dir):
+                logger.debug(f"No existe directorio temporal: {settings.temp_dir}")
+                # Asegurar que el directorio base exista
+                os.makedirs(self.temp_clips_dir, exist_ok=True)
+                return report
+
+            # Iterar entradas y procesar individualmente para evitar EBUSY en mountpoints
+            for name in os.listdir(settings.temp_dir):
+                path = os.path.join(settings.temp_dir, name)
+
+                try:
+                    # Saltar si es un mountpoint (por ejemplo volumen del host)
+                    if os.path.ismount(path):
+                        logger.warning(f"Saltando mountpoint ocupado: {path}")
+                        report["skipped"].append(path)
+                        continue
+
+                    # Archivos simbólicos
+                    if os.path.islink(path):
+                        try:
+                            os.unlink(path)
+                            report["removed"].append(path)
+                            logger.debug(f"Symlink eliminado: {path}")
+                        except OSError as e:
+                            logger.warning(f"No se pudo eliminar symlink {path}: {e}")
+                            report["errors"].append({"path": path, "error": str(e)})
+                        continue
+
+                    # Archivos regulares
+                    if os.path.isfile(path):
+                        try:
+                            os.remove(path)
+                            report["removed"].append(path)
+                            logger.debug(f"Archivo eliminado: {path}")
+                        except OSError as e:
+                            if getattr(e, 'errno', None) == errno.EBUSY:
+                                logger.warning(f"Recurso ocupado, saltando archivo: {path}")
+                                report["skipped"].append(path)
+                            else:
+                                logger.error(f"Error al eliminar archivo {path}: {e}")
+                                report["errors"].append({"path": path, "error": str(e)})
+                        continue
+
+                    # Directorios
+                    if os.path.isdir(path):
+                        try:
+                            shutil.rmtree(path)
+                            report["removed"].append(path)
+                            logger.debug(f"Directorio eliminado: {path}")
+                        except OSError as e:
+                            if getattr(e, 'errno', None) == errno.EBUSY:
+                                logger.warning(f"Recurso ocupado, saltando directorio: {path}")
+                                report["skipped"].append(path)
+                            else:
+                                logger.error(f"Error al eliminar directorio {path}: {e}")
+                                report["errors"].append({"path": path, "error": str(e)})
+                        continue
+
+                except Exception as inner_e:
+                    logger.error(f"Error procesando ruta {path}: {inner_e}")
+                    report["errors"].append({"path": path, "error": str(inner_e)})
+
+            # Intentar eliminar el directorio base si quedó vacío y no es mountpoint
+            try:
+                if not os.path.ismount(settings.temp_dir):
+                    os.rmdir(settings.temp_dir)
+                    logger.info(f"Directorio temporal base eliminado: {settings.temp_dir}")
+                    report["removed"].append(settings.temp_dir)
+                else:
+                    logger.warning(f"Directorio temporal base es un mountpoint, no se elimina: {settings.temp_dir}")
+                    report["skipped"].append(settings.temp_dir)
+            except OSError as e:
+                # Si no está vacío o recurso ocupado, simplemente registrar
+                if getattr(e, 'errno', None) == errno.ENOTEMPTY:
+                    logger.debug(f"Directorio temporal no vacío: {settings.temp_dir}")
+                elif getattr(e, 'errno', None) == errno.EBUSY:
+                    logger.warning(f"Directorio temporal ocupado, no se puede eliminar: {settings.temp_dir}")
+                    report["skipped"].append(settings.temp_dir)
+                else:
+                    logger.warning(f"No se pudo eliminar directorio temporal base: {e}")
+                    report["errors"].append({"path": settings.temp_dir, "error": str(e)})
+
+            # Reconstruir directorios necesarios (si es posible)
+            try:
+                os.makedirs(self.temp_clips_dir, exist_ok=True)
+                self.temp_clips = {}
+            except Exception as exc:
+                logger.warning(f"No se pudo recrear directorios temporales: {exc}")
+                report["errors"].append({"path": self.temp_clips_dir, "error": str(exc)})
+
+            return report
+
+        except Exception as e:
+            logger.error(f"Error al limpiar toda la cache temporal: {e}")
+            # En caso de error inesperado, devolver como error en el informe
+            report["errors"].append({"path": settings.temp_dir, "error": str(e)})
+            return report
