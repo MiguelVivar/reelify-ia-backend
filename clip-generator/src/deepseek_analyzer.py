@@ -121,16 +121,17 @@ class DeepseekVideoAnalyzer:
         self.viral_detector = ViralContentDetector()
         
         # Configuración de calidad temporal dinámica
-        self.min_clip_separation = settings.min_clip_separation_seconds  # Usar configuración
+        # Reducir separación mínima para permitir más clips cercanos y variantes
+        self.min_clip_separation = max(0.5, getattr(settings, 'min_clip_separation_seconds', 1.0))  # mínimo 0.5s si no está en settings
         self.optimal_clip_duration = (settings.optimal_viral_duration_min, settings.optimal_viral_duration_max)  # Rango óptimo dinámico
         self.max_clips_per_video = settings.max_clips_per_video  # Máximo dinámico
         self.absolute_min_duration = settings.absolute_min_clip_duration  # Mínimo absoluto
         self.absolute_max_duration = settings.absolute_max_clip_duration  # Máximo absoluto
-        
+
         # Inicializar Whisper para transcripciones
         # No cargar Whisper automáticamente: usar carga perezosa en _transcribe_segment
         self.whisper_model = None
-        
+
         os.makedirs(self.temp_dir, exist_ok=True)
 
     def _analyze_viral_content(self, text: str) -> Dict[str, float]:
@@ -312,12 +313,12 @@ class DeepseekVideoAnalyzer:
     def _calculate_advanced_score(self, clip_candidate: ClipCandidate) -> float:
         """Calcula puntuación final avanzada con múltiples factores"""
         
-        # Pesos para cada factor
+        # Pesos para cada factor (ajustados para favorecer emoción y variedad)
         weights = {
-            'base_score': 0.35,
-            'emotional_intensity': 0.25,
-            'speech_clarity': 0.15,
-            'conversation_flow': 0.15,
+            'base_score': 0.30,
+            'emotional_intensity': 0.32,
+            'speech_clarity': 0.10,
+            'conversation_flow': 0.18,
             'duration_optimality': 0.10
         }
         
@@ -987,30 +988,37 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
             candidate.final_score = self._calculate_advanced_score(candidate)
             candidates.append(candidate)
 
-            # Generar variantes: usar la heurística de duration y añadir pequeñas variaciones deterministas
+            # Generar variantes: usar la heurística de duration y añadir muchas variaciones deterministas
             base_target = self._compute_candidate_duration(candidate)
-            # Variantes: extendida (contexto), compacta (gancho) y original ajustada
-            variant_factors = [1.25, 0.85, 1.0]
+            # Variantes amplias para producir más clips: desde muy compactas hasta extendidas
+            variant_factors = [0.45, 0.7, 0.85, 1.0, 1.25, 1.6, 2.0]
+            seen_variants = set()
             for factor in variant_factors:
                 target = max(self.absolute_min_duration, min(self.absolute_max_duration, base_target * factor))
-                # determinista pequeño offset para evitar duraciones idénticas
-                offset = ((hash((round(start,2), round(target,2), int(factor*100))) % 9) - 4) / 100.0
+                # offset determinista para diversidad
+                offset = ((hash((round(start,2), round(target,2), int(factor*100))) % 17) - 8) / 100.0
                 target = max(self.absolute_min_duration, target * (1.0 + offset))
                 center = (start + end) / 2.0
                 s = max(0.0, center - target / 2.0)
                 e = s + target
+                key = (round(s, 2), round(e, 2))
+                if key in seen_variants:
+                    continue
+                seen_variants.add(key)
                 if e - s >= self.absolute_min_duration:
+                    # Crear variante con ligera modificación de base_score según tamaño
+                    score_adj = 1.03 if factor > 1.0 else (0.96 if factor < 0.8 else 1.0)
                     var_candidate = ClipCandidate(
                         start=s,
                         end=e,
-                        base_score=base_score * (0.98 if factor==1.0 else 0.95),
+                        base_score=min(1.0, base_score * score_adj),
                         emotional_intensity=emotional_intensity,
                         speech_clarity=speech_clarity,
                         keyword_density=keyword_density,
                         conversation_flow=conversation_flow,
                         audio_energy=audio_energy,
                         final_score=0.0,
-                        reason=f"{highlight.get('reason', 'Momento')} (variante)",
+                        reason=f"{highlight.get('reason', 'Momento')} (variante x{factor:.2f})",
                         transcription=transcription,
                         confidence=confidence
                     )
@@ -1051,15 +1059,16 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         # Ordenar candidatos por tiempo de inicio
         candidates.sort(key=lambda x: x.start)
         
-        # Filtrar candidatos por score mínimo pero permitir mayor número basándonos en cantidad de candidatos
-        min_viral_score = settings.viral_score_threshold  # umbral base configurable
+        # Filtrar candidatos por score mínimo pero relajar para generar más candidatos
+        default_threshold = getattr(settings, 'viral_score_threshold', 0.6)
+        min_viral_score = max(0.3, default_threshold * 0.75)
         viral_candidates = [c for c in candidates if c.final_score >= min_viral_score]
 
-        logger.info(f"Candidatos virales (score >= {min_viral_score}): {len(viral_candidates)} de {len(candidates)}")
+        logger.info(f"Candidatos virales (score >= {min_viral_score:.3f}): {len(viral_candidates)} de {len(candidates)}")
 
-        # Si no hay candidatos que cumplan el umbral, relajar progresivamente
+        # Si no hay candidatos que cumplan el umbral, relajar progresivamente (más pasos)
         if not viral_candidates:
-            relaxed_thresholds = [0.55, 0.5, 0.45, 0.4, 0.35]
+            relaxed_thresholds = [0.55, 0.5, 0.45, 0.4, 0.35, 0.3]
             for threshold in relaxed_thresholds:
                 viral_candidates = [c for c in candidates if c.final_score >= threshold]
                 if viral_candidates:
@@ -1079,8 +1088,8 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
             return viral_candidates
 
         # Usar límite dinámico de clips basado en número de candidatos detectados
-        # Queremos permitir tantos clips virales como se hayan encontrado, hasta un tope razonable
-        dynamic_limit = min(self.max_clips_per_video, max(5, n))
+        # Aumentamos los topes para permitir generar muchos más clips por video
+        dynamic_limit = max(self.max_clips_per_video, min(200, n))
         max_clips_allowed = min(dynamic_limit, n)
 
         # Crear matriz de compatibilidad temporal
@@ -1114,10 +1123,18 @@ NOTA CRÍTICA: NO te limites por números artificiales. Si encuentras 8 momentos
         selected_clips = []
         # Ordenar por score desc para intentar tomar los momentos más fuertes primero
         for clip in sorted(viral_candidates, key=lambda x: x.final_score, reverse=True):
-            # Verificar que no solape excesivamente con clips ya seleccionados
-            overlaps = any(max(0.0, min(c.end, clip.end) - max(c.start, clip.start)) / max(1e-6, max(c.end - c.start, clip.end - clip.start)) > 0.6 for c in selected_clips)
-            separation_ok = all(abs(clip.start - c.end) >= self.min_clip_separation and abs(c.start - clip.end) >= self.min_clip_separation for c in selected_clips)
-            if not overlaps or separation_ok:
+            # Permitir solapamientos suaves y priorizar incluir variantes cercanas
+            overlaps_ratio = 0.0
+            for c in selected_clips:
+                overlap = max(0.0, min(c.end, clip.end) - max(c.start, clip.start))
+                norm = max(1e-6, min(c.end - c.start, clip.end - clip.start))
+                overlaps_ratio = max(overlaps_ratio, overlap / norm)
+
+            # Condiciones para aceptar: no solapamiento total, o clip de alta puntuación
+            too_much_overlap = overlaps_ratio > 0.9
+            separation_ok = all(abs(clip.start - c.end) >= self.min_clip_separation for c in selected_clips)
+
+            if not too_much_overlap and (separation_ok or clip.final_score > 0.55 or len(selected_clips) < 5):
                 selected_clips.append(clip)
             if len(selected_clips) >= max_clips_allowed:
                 break
